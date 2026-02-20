@@ -1,5 +1,6 @@
 """Docker Compose 编排文件管理。"""
 
+from typing import cast
 from pathlib import Path
 
 from ..utils.console import info, success
@@ -54,17 +55,26 @@ def apply_mirror_to_compose(data_dir: Path, mirror: str) -> None:
         return
 
     with open(compose_path, encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+        content = yaml.safe_load(f)  # pyright: ignore[reportAny]
 
-    if not isinstance(data, dict) or "services" not in data:
+    if not isinstance(content, dict) or "services" not in content:
         return
 
-    services = data["services"]
+    data = cast(dict[str, object], content)
+    services_data = data["services"]
+
+    if not isinstance(services_data, dict):
+        return
+
+    services = cast(dict[str, dict[str, object]], services_data)
     modified = False
 
     for service_name, service_config in services.items():
         if "image" in service_config:
             image = service_config["image"]
+            if not isinstance(image, str):
+                continue
+
             # 避免重复添加
             if not image.startswith(mirror):
                 # 处理已经有域名的镜像 (e.g. ghcr.io/...)
@@ -88,3 +98,48 @@ def apply_mirror_to_compose(data_dir: Path, mirror: str) -> None:
         with open(compose_path, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
         success(f"已更新 docker-compose.yml 使用镜像站: {mirror}")
+
+
+def patch_compose_isolation(data_dir: Path) -> None:
+    """修补 docker-compose.yml 以移除硬编码的容器名和卷名，避免冲突。
+
+    Args:
+        data_dir: 数据目录。
+    """
+    import yaml
+
+    compose_path = data_dir / COMPOSE_FILE
+    if not compose_path.exists():
+        return
+
+    with open(compose_path, encoding="utf-8") as f:
+        content = yaml.safe_load(f)  # pyright: ignore[reportAny]
+
+    if not isinstance(content, dict):
+        return
+
+    data = cast(dict[str, object], content)
+    modified = False
+
+    # 1. 移除 services 下的 container_name
+    services = cast(dict[str, dict[str, object]], data.get("services", {}))
+    for service_name, service_config in services.items():
+        if "container_name" in service_config:
+            del service_config["container_name"]
+            modified = True
+            info(f"  已移除服务 {service_name} 的 container_name")
+
+    # 2. 移除 volumes 下的 name (让 docker compose 自动生成)
+    volumes = cast(dict[str, dict[str, object] | None], data.get("volumes", {}))
+    if volumes:
+        for volume_name, volume_config in volumes.items():
+            if volume_config:
+                if "name" in volume_config:
+                    del volume_config["name"]
+                    modified = True
+                    info(f"  已移除卷 {volume_name} 的显式 name")
+
+    if modified:
+        with open(compose_path, "w", encoding="utf-8") as f:
+            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+        success("已更新 docker-compose.yml 以支持多实例部署")

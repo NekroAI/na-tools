@@ -5,7 +5,8 @@ import platform
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import cast
+
 
 from ..utils.console import error
 
@@ -42,7 +43,10 @@ def load_global_config() -> dict[str, object]:
     try:
         import json
 
-        return json.loads(config_path.read_text(encoding="utf-8"))
+        data = json.loads(config_path.read_text(encoding="utf-8"))  # pyright: ignore[reportAny]
+        if isinstance(data, dict):
+            return cast(dict[str, object], data)
+        return {}
     except Exception:
         return {}
 
@@ -52,7 +56,7 @@ def save_global_config(config: dict[str, object]) -> None:
     import json
 
     config_path = get_global_config_dir() / "config.json"
-    config_path.write_text(
+    _ = config_path.write_text(
         json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8"
     )
 
@@ -69,6 +73,7 @@ def set_default_data_dir(data_dir: Path) -> None:
     installations = config.get("installations", {})
     if not isinstance(installations, dict):
         installations = {}
+    installations = cast(dict[str, dict[str, int]], installations)
 
     installations[str_path] = {
         "installed_at": installations.get(str_path, {}).get(
@@ -96,11 +101,11 @@ def default_data_dir() -> Path:
 def run_cmd(
     cmd: list[str],
     *,
-    cwd: Optional[Path] = None,
+    cwd: Path | None = None,
     capture: bool = False,
     check: bool = True,
-    env: Optional[dict[str, str]] = None,
-    unset_keys: Optional[set[str]] = None,
+    env: dict[str, str] | None = None,
+    unset_keys: set[str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """跨平台命令执行封装。
 
@@ -117,7 +122,7 @@ def run_cmd(
         merged_env = {**os.environ}
         if unset_keys:
             for key in unset_keys:
-                merged_env.pop(key, None)
+                _ = merged_env.pop(key, None)
         if env:
             merged_env.update(env)
 

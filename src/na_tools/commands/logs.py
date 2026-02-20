@@ -5,10 +5,12 @@ import click
 from ..core.compose import compose_exists
 from ..core.docker import DockerEnv
 from ..core.platform import default_data_dir
+from ..utils.privilege import with_sudo_fallback
 from ..utils.console import error
 
 
 @click.command()
+@with_sudo_fallback
 @click.argument("service", default="nekro_agent")
 @click.option("--data-dir", type=click.Path(), default=None, help="数据目录路径")
 @click.option("--follow", "-f", is_flag=True, default=False, help="持续跟踪日志")

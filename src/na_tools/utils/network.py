@@ -33,8 +33,8 @@ def download_file(filename: str, output: Path) -> bool:
             info(f"正在下载 {filename} ...")
             with httpx.Client(timeout=TIMEOUT, follow_redirects=True) as client:
                 resp = client.get(url)
-                resp.raise_for_status()
-            output.write_bytes(resp.content)
+                _ = resp.raise_for_status()
+            _ = output.write_bytes(resp.content)
             return True
         except httpx.HTTPError:
             info(f"从 {base_url} 下载失败，尝试其他源...")
@@ -51,8 +51,8 @@ def download_url(url: str, output: Path) -> bool:
         info(f"正在下载 {url} ...")
         with httpx.Client(timeout=TIMEOUT, follow_redirects=True) as client:
             resp = client.get(url)
-            resp.raise_for_status()
-        output.write_bytes(resp.content)
+            _ = resp.raise_for_status()
+        _ = output.write_bytes(resp.content)
         return True
     except httpx.HTTPError as e:
         error(f"下载失败: {e}")

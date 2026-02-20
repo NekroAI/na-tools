@@ -52,7 +52,7 @@ def get_nested(data: dict[str, object], key_path: str) -> object | None:
     keys = key_path.split(".")
     current = data
     for key in keys:
-        if isinstance(current, dict) and key in current:
+        if current and key in current:
             current = current[key]
         else:
             return None

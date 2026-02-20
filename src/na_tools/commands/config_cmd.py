@@ -6,6 +6,7 @@ from typing import cast
 import click
 
 from ..core.docker import DockerEnv
+from ..utils.privilege import with_sudo_fallback
 from ..core.na_config import (
     get_nested,
     get_super_users,
@@ -40,6 +41,7 @@ def _resolve_ctx_data_dir(ctx: click.Context) -> Path:
 @click.group(invoke_without_command=True)
 @click.option("--data-dir", type=click.Path(), default=None, help="数据目录路径")
 @click.pass_context
+@with_sudo_fallback
 def config(ctx: click.Context, data_dir: str | None) -> None:
     """快捷配置 nekro-agent.yaml。
 
@@ -136,6 +138,7 @@ def _interactive_wizard(data_dir_str: str | None) -> None:
 @config.command("get")
 @click.argument("key")
 @click.pass_context
+@with_sudo_fallback
 def config_get(ctx: click.Context, key: str) -> None:
     """查看配置项的值。"""
     data_dir = _resolve_ctx_data_dir(ctx)
@@ -155,6 +158,7 @@ def config_get(ctx: click.Context, key: str) -> None:
 @click.argument("key")
 @click.argument("value")
 @click.pass_context
+@with_sudo_fallback
 def config_set(ctx: click.Context, key: str, value: str) -> None:
     """设置配置项的值。"""
     data_dir = _resolve_ctx_data_dir(ctx)
@@ -181,6 +185,7 @@ def config_set(ctx: click.Context, key: str, value: str) -> None:
 
 @config.command("show")
 @click.pass_context
+@with_sudo_fallback
 def config_show(ctx: click.Context) -> None:
     """查看当前配置摘要。"""
     data_dir = _resolve_ctx_data_dir(ctx)
@@ -224,6 +229,7 @@ def config_show(ctx: click.Context) -> None:
 @config.command("model")
 @click.option("--group", default="default", help="模型组名称")
 @click.pass_context
+@with_sudo_fallback
 def config_model(ctx: click.Context, group: str) -> None:
     """交互式配置模型组。"""
     data_dir = _resolve_ctx_data_dir(ctx)
@@ -272,6 +278,7 @@ def config_model(ctx: click.Context, group: str) -> None:
 @click.option("--add", "add_user", default=None, help="添加管理员 QQ 号")
 @click.option("--remove", "remove_user", default=None, help="移除管理员 QQ 号")
 @click.pass_context
+@with_sudo_fallback
 def config_admin(
     ctx: click.Context, add_user: str | None, remove_user: str | None
 ) -> None:

@@ -1,5 +1,6 @@
 """Docker / Docker Compose 环境检测与操作。"""
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -247,7 +248,6 @@ class DockerEnv:
             # 查一下 sandbox 用法。目前只看到 docker_pull。
             # 假设 sandbox 只是 pull 下来备用，或者 user 手动 run。
             # 如果 user 手动 run original name，docker 会找不到。
-            # 所以最好 tag 一下。
             if mirror:
                 try:
                     _ = run_cmd([docker_path, "tag", target_image, image])
@@ -273,3 +273,92 @@ class DockerEnv:
             args.append("-f")
         args.append(service)
         _ = self.compose(*args, cwd=cwd, env_file=env_file, check=False)
+
+    def get_compose_config(
+        self, cwd: Path, env_file: Path | None = None
+    ) -> dict[str, object] | None:
+        """获取 docker compose 配置（JSON 格式）。"""
+        try:
+            result = self.compose(
+                "config", "--format", "json", cwd=cwd, env_file=env_file, capture=True
+            )
+            return json.loads(result.stdout)  # pyright: ignore[reportAny]
+        except Exception as e:
+            error(f"获取 compose 配置失败: {e}")
+            return None
+
+    def run_ephemeral(
+        self,
+        image: str,
+        cmd: list[str],
+        volumes: dict[str, str],
+        workdir: str | None = None,
+    ) -> bool:
+        """运行一次性容器（--rm）。
+
+        Args:
+            image: 镜像名。
+            cmd: 命令列表。
+            volumes: 挂载配置 {host_path_or_volume: container_path}。
+            workdir: 工作目录。
+        """
+        if not self.docker_path:
+            return False
+
+        docker_cmd = [self.docker_path, "run", "--rm"]
+
+        for src, dst in volumes.items():
+            docker_cmd.extend(["-v", f"{src}:{dst}"])
+
+        if workdir:
+            docker_cmd.extend(["-w", workdir])
+
+        docker_cmd.append(image)
+        docker_cmd.extend(cmd)
+
+        try:
+            _ = run_cmd(docker_cmd, check=True)
+            return True
+        except Exception as e:
+            error(f"容器运行失败: {e}")
+            return False
+
+    def get_service_volume(
+        self,
+        cwd: Path,
+        service: str,
+        target: str,
+        env_file: Path | None = None,
+    ) -> str | None:
+        """获取服务指定挂载点的实际卷名。"""
+        # 1. 获取容器 ID (包括停止的)
+        res = self.compose(
+            "ps",
+            "-a",
+            "-q",
+            service,
+            cwd=cwd,
+            env_file=env_file,
+            capture=True,
+            check=False,
+        )
+        cid = res.stdout.strip()
+        if not cid:
+            return None
+
+        # 2. Inspect 容器
+        if not self.docker_path:
+            return None
+
+        try:
+            res = run_cmd(
+                [self.docker_path, "inspect", "--format", "{{json .Mounts}}", cid],
+                capture=True,
+            )
+            mounts: list[dict[str, str]] = json.loads(res.stdout)  # pyright: ignore[reportAny]
+            for m in mounts:
+                if m.get("Destination") == target and m.get("Type") == "volume":
+                    return m.get("Name")
+        except Exception:
+            return None
+        return None

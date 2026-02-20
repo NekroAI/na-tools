@@ -2,14 +2,21 @@
 
 import click
 
-from ..core.compose import apply_mirror_to_compose, download_compose
+from ..core.compose import (
+    apply_mirror_to_compose,
+    download_compose,
+    patch_compose_isolation,
+)
+
 from ..core.config import load_env, setup_env
 from ..core.docker import DockerEnv
 from ..core.platform import default_data_dir, set_default_data_dir
+from ..utils.privilege import with_sudo_fallback
 from ..utils.console import confirm, error, info, print_panel, prompt, warning
 
 
 @click.command()
+@with_sudo_fallback
 @click.option("--data-dir", type=click.Path(), default=None, help="数据目录路径")
 @click.option("--with-napcat/--without-napcat", default=None, help="是否含 NapCat 服务")
 @click.option("--port", type=int, default=None, help="服务暴露端口")
@@ -69,6 +76,8 @@ def install(
     if not download_compose(data_dir_path, with_napcat=with_napcat):
         error("无法下载 docker-compose.yml，请检查网络连接。")
         raise click.Abort()
+
+    patch_compose_isolation(data_dir_path)
 
     # 6. 配置镜像站
     env = load_env(env_path)

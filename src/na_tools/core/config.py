@@ -1,7 +1,7 @@
 """.env 配置文件管理。"""
 
 from pathlib import Path
-from typing import Optional
+
 
 from ..utils.console import info, prompt, success
 from ..utils.crypto import random_string
@@ -53,7 +53,7 @@ def save_env(env_path: Path, data: dict[str, str]) -> None:
         if key not in written_keys:
             lines.append(f"{key}={value}")
 
-    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _ = env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def download_env_example(data_dir: Path) -> bool:
@@ -66,7 +66,7 @@ def setup_env(
     *,
     interactive: bool = True,
     with_napcat: bool = False,
-    port: Optional[int] = None,
+    port: int | None = None,
 ) -> Path:
     """设置 .env 文件（交互式或使用默认值）。
 
@@ -84,7 +84,7 @@ def setup_env(
 
         import shutil
 
-        shutil.copy(example_path, env_path)
+        _ = shutil.copy(example_path, env_path)
         info(f"已创建 .env 文件: {env_path}")
 
     # 加载现有配置
@@ -96,16 +96,20 @@ def setup_env(
     # 端口
     if port:
         env["NEKRO_EXPOSE_PORT"] = str(port)
-    elif interactive and not env.get("NEKRO_EXPOSE_PORT"):
-        env["NEKRO_EXPOSE_PORT"] = prompt("请设置服务端口", default="8021")
+    elif interactive:
+        default_port = env.get("NEKRO_EXPOSE_PORT", "8021")
+        env["NEKRO_EXPOSE_PORT"] = prompt("请设置服务端口", default=default_port)
 
     if not env.get("NEKRO_EXPOSE_PORT"):
         env["NEKRO_EXPOSE_PORT"] = "8021"
 
     # NapCat 端口
     if with_napcat:
-        if interactive and not env.get("NAPCAT_EXPOSE_PORT"):
-            env["NAPCAT_EXPOSE_PORT"] = prompt("请设置 NapCat 端口", default="6099")
+        if interactive:
+            default_napcat = env.get("NAPCAT_EXPOSE_PORT", "6099")
+            env["NAPCAT_EXPOSE_PORT"] = prompt(
+                "请设置 NapCat 端口", default=default_napcat
+            )
         if not env.get("NAPCAT_EXPOSE_PORT"):
             env["NAPCAT_EXPOSE_PORT"] = "6099"
 
@@ -129,9 +133,9 @@ def setup_env(
         info("已自动生成 QDRANT_API_KEY")
 
     # 数据库默认值
-    env.setdefault("POSTGRES_USER", "nekro_agent")
-    env.setdefault("POSTGRES_PASSWORD", "nekro_agent")
-    env.setdefault("POSTGRES_DATABASE", "nekro_agent")
+    _ = env.setdefault("POSTGRES_USER", "nekro_agent")
+    _ = env.setdefault("POSTGRES_PASSWORD", "nekro_agent")
+    _ = env.setdefault("POSTGRES_DATABASE", "nekro_agent")
 
     save_env(env_path, env)
     success(f".env 配置已保存: {env_path}")

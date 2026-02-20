@@ -5,10 +5,12 @@ import click
 from ..core.compose import compose_exists
 from ..core.docker import DockerEnv
 from ..core.platform import default_data_dir
+from ..utils.privilege import with_sudo_fallback
 from ..utils.console import console, error, info
 
 
 @click.command()
+@with_sudo_fallback
 @click.option("--data-dir", type=click.Path(), default=None, help="数据目录路径")
 def status(data_dir: str | None) -> None:
     """查看 Nekro Agent 服务状态。"""

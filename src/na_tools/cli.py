@@ -11,6 +11,7 @@ from .commands.restore import restore
 from .commands.status import status
 from .commands.update import update
 from .commands.use import use
+from .commands.list_cmd import list_cmd
 
 
 @click.group()
@@ -31,6 +32,7 @@ main.add_command(config)
 main.add_command(status)
 main.add_command(logs)
 main.add_command(use)
+main.add_command(list_cmd)
 
 
 if __name__ == "__main__":

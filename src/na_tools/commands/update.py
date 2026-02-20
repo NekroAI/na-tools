@@ -6,10 +6,12 @@ from ..core.compose import compose_exists
 from ..core.config import load_env
 from ..core.docker import DockerEnv
 from ..core.platform import default_data_dir
+from ..utils.privilege import with_sudo_fallback
 from ..utils.console import error, info, success, warning
 
 
 @click.command()
+@with_sudo_fallback
 @click.option("--data-dir", type=click.Path(), default=None, help="数据目录路径")
 @click.option(
     "--update-sandbox/--no-update-sandbox", default=True, help="是否同时更新沙盒镜像"
