@@ -8,14 +8,15 @@ from pathlib import Path
 from typing import cast
 
 
-from ..utils.console import error
+from ..utils.console import error, info
 
 
 def get_os() -> str:
     """返回当前操作系统标识: 'linux', 'darwin'。Windows 下直接退出。"""
     os_name = platform.system().lower()
     if os_name == "windows":
-        error("不支持 Windows 系统。请在 Linux 或 macOS 上运行。")
+        error("当前工具不支持 Windows 系统。")
+        info("Windows 用户请使用专属工具: https://github.com/liugu2023/na_for_windows")
         sys.exit(1)
     return os_name
 
