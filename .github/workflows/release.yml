@@ -1,0 +1,52 @@
+name: Build and Release Executables
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -e .
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller --name na-tools --paths src --onefile src/na_tools/__main__.py
+
+      - name: Rename executable (Linux)
+        if: runner.os == 'Linux'
+        run: mv dist/na-tools dist/na-tools-linux-amd64
+
+      - name: Rename executable (macOS)
+        if: runner.os == 'macOS'
+        run: mv dist/na-tools dist/na-tools-darwin-amd64
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/na-tools-linux-amd64
+            dist/na-tools-darwin-amd64
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
