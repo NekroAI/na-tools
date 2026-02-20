@@ -1,6 +1,6 @@
 [project]
 name = "na-tools"
-version = "0.1.0"
+version = "1.0.0"
 description = "Nekro Agent 跨平台自动部署 CLI 工具"
 readme = "README.md"
 requires-python = ">=3.10"
