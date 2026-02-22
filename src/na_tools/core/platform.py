@@ -16,7 +16,7 @@ def get_os() -> str:
     os_name = platform.system().lower()
     if os_name == "windows":
         error("当前工具不支持 Windows 系统。")
-        info("Windows 用户请使用专属工具: https://github.com/liugu2023/na_for_windows")
+        info("Windows 用户请使用专属工具: https://github.com/liugu2023/nekro-agent-for-windows")
         sys.exit(1)
     return os_name
 
@@ -96,7 +96,7 @@ def default_data_dir() -> Path:
             return Path(current)
 
     # 2. 回退到硬编码默认值
-    return Path.home() / "nekro_agent"
+    return Path.home() / "srv" /"nekro_agent"
 
 
 def run_cmd(
