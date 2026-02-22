@@ -1,4 +1,4 @@
-name: Build and Release Executables
+name: Release to PyPI
 
 on:
   push:
@@ -7,46 +7,39 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
-    name: Build on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-
+  release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version-file: "pyproject.toml"
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pyinstaller
-          pip install -e .
+      - name: Build project
+        run: uv build
 
-      - name: Build with PyInstaller
-        run: |
-          pyinstaller --name na-tools --paths src --onefile src/na_tools/__main__.py
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_TOKEN }}
 
-      - name: Rename executable (Linux)
-        if: runner.os == 'Linux'
-        run: mv dist/na-tools dist/na-tools-linux-amd64
-
-      - name: Rename executable (macOS)
-        if: runner.os == 'macOS'
-        run: mv dist/na-tools dist/na-tools-darwin-amd64
-
-      - name: Upload Release Asset
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
-            dist/na-tools-linux-amd64
-            dist/na-tools-darwin-amd64
+            dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
