@@ -44,13 +44,13 @@ def use(data_dir: str) -> None:
         # 作为路径解析
         path = Path(data_dir).expanduser().resolve()
 
+    if not path.is_dir():
+        error(f"目录不存在: {path}")
+        return
+
     if not compose_exists(path):
-        # 即使没有 compose 文件，可能用户只是想切到一个还没安装好的目录？
-        # 不过为了安全，最好还是给个警告或者确认。
-        # 这里我们假设切换的目标必须是一个有效的na-tools目录（至少看起来像）
-        pass
-        # error(f"该目录似乎不是一个有效的 Nekro Agent 数据目录: {path}")
-        # return
+        error(f"该目录不是有效的 Nekro Agent 数据目录（缺少 docker-compose.yml）: {path}")
+        return
 
     set_default_data_dir(path)
     success(f"已切换当前数据目录至: {path}")

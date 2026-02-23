@@ -80,20 +80,6 @@ def set_nested(data: dict[str, object], key_path: str, value: object) -> None:
     current[keys[-1]] = value
 
 
-def get_model_groups(data: dict[str, object]) -> dict[str, object]:
-    """获取模型组配置。"""
-    system: object = data.get("system", data)
-    if not isinstance(system, dict):
-        system = {}
-
-    # We know system is a dict now
-    system_dict = cast(dict[str, object], system)
-    groups = system_dict.get("MODEL_GROUPS", {})
-    if isinstance(groups, dict):
-        return cast(dict[str, object], groups)
-    return {}
-
-
 def set_model_group(
     data: dict[str, object],
     group_name: str,

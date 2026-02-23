@@ -136,7 +136,3 @@ def run_cmd(
         env=merged_env,
     )
 
-
-def docker_socket_volume() -> str:
-    """返回 Docker socket 挂载路径（用于 compose 文件中）。"""
-    return "/var/run/docker.sock:/var/run/docker.sock"

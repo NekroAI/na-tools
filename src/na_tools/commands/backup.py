@@ -6,9 +6,9 @@ from pathlib import Path
 
 import click
 
-from ..core.compose import compose_exists
+from ..core.compose import compose_exists, resolve_service_volumes
 from ..core.docker import DockerEnv
-from ..core.platform import default_data_dir
+from ..core.platform import default_data_dir, get_global_config_dir
 from ..utils.privilege import with_sudo_fallback
 from ..utils.console import error, info, success, warning
 
@@ -25,6 +25,9 @@ def backup(
     ctx: click.Context, data_dir: str | None, output: str | None, no_restart: bool
 ) -> None:
     """备份 Nekro Agent 数据和配置。"""
+    ctx.ensure_object(dict)
+    ctx.obj["data_dir"] = data_dir
+
     if ctx.invoked_subcommand is not None:
         return
 
@@ -42,7 +45,7 @@ def backup(
     if output:
         backup_path = Path(output)
     else:
-        backup_dir = Path("~/.config/na-tools/backup").expanduser() / data_dir_path.name
+        backup_dir = get_global_config_dir() / "backup" / data_dir_path.name
         backup_dir.mkdir(parents=True, exist_ok=True)
         backup_path = backup_dir / f"{data_dir_path.name}_backup_{timestamp}.tar.gz"
 
@@ -55,58 +58,19 @@ def backup(
     volumes_dir = data_dir_path / "volumes_backup_tmp"
 
     if compose_exists(data_dir_path) and docker.compose_installed:
-        config = docker.get_compose_config(
-            cwd=data_dir_path, env_file=env_path if env_path.exists() else None
-        )
-        if config and "services" in config and isinstance(config["services"], dict):
-            from typing import cast
-
-            services = cast(dict[str, dict[str, object]], config["services"])
-
-            # 映射关系: 服务名 -> 内部挂载点 -> 备份文件名
-            backup_targets = {
-                "nekro_postgres": ("/var/lib/postgresql/data", "postgres.tar.gz"),
-                "nekro_qdrant": ("/qdrant/storage", "qdrant.tar.gz"),
-            }
-
-            for svc_name, (internal_path, filename) in backup_targets.items():
-                if svc_name in services:
-                    # 尝试解析卷名
-                    real_volume_name = docker.get_service_volume(
-                        cwd=data_dir_path,
-                        service=svc_name,
-                        target=internal_path,
-                        env_file=env_path if env_path.exists() else None,
-                    )
-
-                    # 如果解析失败（容器未运行？），尝试从配置读取
-                    if not real_volume_name:
-                        svc_config = services[svc_name]
-                        volumes_config = svc_config.get("volumes", [])
-                        if isinstance(volumes_config, list):
-                            volumes = cast(list[dict[str, str]], volumes_config)
-                            for vol in volumes:
-                                if not vol:
-                                    continue
-                                if (
-                                    vol.get("type") == "volume"
-                                    and vol.get("target") == internal_path
-                                ):
-                                    real_volume_name = vol.get("source")
-                                    break
-
-                    if real_volume_name:
-                        volume_backups_map.append(
-                            (real_volume_name, filename, volumes_dir / filename)
-                        )
+        env_file = env_path if env_path.exists() else None
+        for vol_name, filename in resolve_service_volumes(docker, data_dir_path, env_file):
+            volume_backups_map.append((vol_name, filename, volumes_dir / filename))
 
     # 停止服务
     should_restart = False
     if compose_exists(data_dir_path) and docker.compose_installed:
         info("正在停止服务以确保数据一致性...")
-        _ = docker.down(
+        if not docker.down(
             cwd=data_dir_path, env_file=env_path if env_path.exists() else None
-        )
+        ):
+            error("服务停止失败，为避免备份数据不一致，已中止备份。")
+            raise click.Abort()
         should_restart = True
 
     # 执行卷备份
@@ -182,19 +146,10 @@ def backup(
 @click.pass_context
 def list_backups(ctx: click.Context) -> None:
     """列出可用的备份文件。"""
-    data_dir = None
-    import typing
-
-    obj = typing.cast(object, ctx.obj)
-    if isinstance(obj, dict):
-        from typing import cast
-
-        obj_dict = cast(dict[str, object], obj)
-        val = obj_dict.get("data_dir")
-        if isinstance(val, str):
-            data_dir = val
+    obj = ctx.ensure_object(dict)
+    data_dir: str | None = obj.get("data_dir")
     data_dir_path = Path(data_dir or default_data_dir()).expanduser().resolve()
-    backup_dir = Path("~/.config/na-tools/backup").expanduser() / data_dir_path.name
+    backup_dir = get_global_config_dir() / "backup" / data_dir_path.name
 
     if not backup_dir.exists():
         info("备份目录不存在或为空。")

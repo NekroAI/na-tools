@@ -5,8 +5,9 @@ from pathlib import Path
 
 import click
 
+from ..core.compose import resolve_service_volumes
 from ..core.docker import DockerEnv
-from ..core.platform import default_data_dir
+from ..core.platform import default_data_dir, get_global_config_dir
 from ..utils.privilege import with_sudo_fallback
 from ..utils.console import confirm, error, info, success, warning
 
@@ -22,7 +23,7 @@ def restore(backup_file: str | None, data_dir: str | None) -> None:
     if not backup_file:
         from datetime import datetime
 
-        backup_dir = Path("~/.config/na-tools/backup").expanduser() / data_dir_path.name
+        backup_dir = get_global_config_dir() / "backup" / data_dir_path.name
 
         backups = []
         if backup_dir.exists():
@@ -100,7 +101,7 @@ def restore(backup_file: str | None, data_dir: str | None) -> None:
             import shutil
 
             with tempfile.TemporaryDirectory() as tmp_dir:
-                tar.extractall(tmp_dir)
+                tar.extractall(tmp_dir, filter="data")
                 extracted_dir = Path(tmp_dir) / top_dir
 
                 # 检查是否存在 volumes 备份
@@ -129,8 +130,6 @@ def restore(backup_file: str | None, data_dir: str | None) -> None:
                 # 恢复存储卷
                 if has_volumes:
                     info("发现存储卷备份，正在恢复...")
-                    # 此时 docker-compose.yml 和 .env 应该已经恢复到了 data_dir_path
-                    # 我们尝试获取最新的配置来解析卷名
                     if (
                         data_dir_path / "docker-compose.yml"
                     ).exists() and docker.compose_installed:
@@ -144,127 +143,48 @@ def restore(backup_file: str | None, data_dir: str | None) -> None:
                             check=False,
                         )
 
-                        config = docker.get_compose_config(
-                            cwd=data_dir_path,
-                            env_file=env_path if env_path.exists() else None,
-                        )
-
-                        if (
-                            config
-                            and "services" in config
-                            and isinstance(config["services"], dict)
-                        ):
-                            from typing import cast
-
-                            services = cast(
-                                dict[str, dict[str, object]], config["services"]
+                        env_file = env_path if env_path.exists() else None
+                        # 建立 备份文件名 -> 卷名 的映射
+                        volume_map = {
+                            filename: vol_name
+                            for vol_name, filename in resolve_service_volumes(
+                                docker, data_dir_path, env_file
                             )
+                        }
 
-                            # 映射关系: 备份文件名 -> 内部挂载点 -> 服务名
-                            restore_map = {
-                                "postgres.tar.gz": (
-                                    "/var/lib/postgresql/data",
-                                    "nekro_postgres",
-                                ),
-                                "qdrant.tar.gz": ("/qdrant/storage", "nekro_qdrant"),
-                            }
+                        for vol_file in volumes_backup_dir.iterdir():
+                            target_volume = volume_map.get(vol_file.name)
+                            if target_volume:
+                                info(
+                                    f"正在恢复存储卷 {target_volume} ({vol_file.name})..."
+                                )
 
-                            for vol_file in volumes_backup_dir.iterdir():
-                                if vol_file.name in restore_map:
-                                    internal_path, svc_name = restore_map[vol_file.name]
+                                success_restore = docker.run_ephemeral(
+                                    image="alpine:latest",
+                                    cmd=[
+                                        "tar",
+                                        "xzf",
+                                        f"/backup/{vol_file.name}",
+                                        "-C",
+                                        "/data",
+                                    ],
+                                    volumes={
+                                        target_volume: "/data",
+                                        str(volumes_backup_dir): "/backup",
+                                    },
+                                )
 
-                                    if svc_name in services:
-                                        # 尝试解析卷名
-                                        target_volume = docker.get_service_volume(
-                                            cwd=data_dir_path,
-                                            service=svc_name,
-                                            target=internal_path,
-                                            env_file=env_path
-                                            if env_path.exists()
-                                            else None,
-                                        )
-
-                                        # 如果解析失败，尝试从配置读取 (fallback)
-                                        if not target_volume:
-                                            svc_config = services[svc_name]
-                                            volumes_config = svc_config.get(
-                                                "volumes", []
-                                            )
-                                            if isinstance(volumes_config, list):
-                                                volumes = cast(
-                                                    list[dict[str, str]], volumes_config
-                                                )
-                                                for vol in volumes:
-                                                    if not vol:
-                                                        continue
-                                                    if (
-                                                        vol.get("type") == "volume"
-                                                        and vol.get("target")
-                                                        == internal_path
-                                                    ):
-                                                        target_volume = vol.get(
-                                                            "source"
-                                                        )
-                                                        break
-
-                                        if target_volume:
-                                            info(
-                                                f"正在恢复存储卷 {target_volume} ({vol_file.name})..."
-                                            )
-
-                                            # 使用 alpine 恢复
-                                            # 注意：volumes_backup_dir 是在 tmp_dir 下的，我们需要把这个文件挂载进去
-                                            # 或者我们可以直接把这个文件读入？不，挂载最简单
-
-                                            success_restore = docker.run_ephemeral(
-                                                image="alpine:latest",
-                                                cmd=[
-                                                    "tar",
-                                                    "xzf",
-                                                    f"/backup/{vol_file.name}",
-                                                    "-C",
-                                                    "/data",
-                                                ],
-                                                volumes={
-                                                    target_volume: "/data",
-                                                    str(volumes_backup_dir): "/backup",
-                                                },
-                                            )
-
-                                            if success_restore:
-                                                success(f"卷恢复完成: {target_volume}")
-                                            else:
-                                                error(f"卷恢复失败: {target_volume}")
+                                if success_restore:
+                                    success(f"卷恢复完成: {target_volume}")
+                                else:
+                                    error(f"卷恢复失败: {target_volume}")
 
         success("备份恢复完成!")
-    except PermissionError as e:
-        import os
-        import sys
-
-        error(f"由于权限不足导致恢复中断: {e}")
-        if os.name != "nt" and hasattr(os, "geteuid") and os.geteuid() != 0:
-            warning("检测到权限问题，将尝试获取管理员权限(root)以完成恢复。")
-            info("请在下方输入您的当前用户密码：")
-            # 使用 sudo -E 重新执行，-E 参数用于保留当前的所有环境变量（对虚拟环境/uv很重要）
-            # 执行 sys.executable 以使用当前的 Python 解释器
-            os.execvp("sudo", ["sudo", "-E", sys.executable] + sys.argv)
-        else:
-            raise click.Abort()
     except Exception as e:
-        import os
-        import sys
-
-        if (
-            "Permission denied" in str(e)
-            and os.name != "nt"
-            and hasattr(os, "geteuid")
-            and os.geteuid() != 0
-        ):
-            error(f"由于权限不足导致恢复中断: {e}")
-            warning("检测到权限问题，将尝试获取管理员权限(root)以完成恢复。")
-            info("请在下方输入您的当前用户密码：")
-            os.execvp("sudo", ["sudo", "-E", sys.executable] + sys.argv)
-
+        if isinstance(e, (click.Abort, PermissionError)):
+            raise
+        if "Permission denied" in str(e):
+            raise
         error(f"恢复失败: {e}")
         raise click.Abort()
 

@@ -1,14 +1,25 @@
 """Docker Compose 编排文件管理。"""
 
-from typing import cast
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, cast
 from pathlib import Path
 
 from ..utils.console import info, success
 from ..utils.network import download_file
 
+if TYPE_CHECKING:
+    from .docker import DockerEnv
+
 
 COMPOSE_FILE = "docker-compose.yml"
 COMPOSE_NAPCAT_FILE = "docker-compose-x-napcat.yml"
+
+# 需要备份/恢复的服务卷映射: 服务名 -> (容器内挂载路径, 备份文件名)
+VOLUME_BACKUP_TARGETS: dict[str, tuple[str, str]] = {
+    "nekro_postgres": ("/var/lib/postgresql/data", "postgres.tar.gz"),
+    "nekro_qdrant": ("/qdrant/storage", "qdrant.tar.gz"),
+}
 
 
 def download_compose(data_dir: Path, *, with_napcat: bool = False) -> bool:
@@ -143,3 +154,50 @@ def patch_compose_isolation(data_dir: Path) -> None:
         with open(compose_path, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
         success("已更新 docker-compose.yml 以支持多实例部署")
+
+
+def resolve_service_volumes(
+    docker: DockerEnv,
+    data_dir: Path,
+    env_file: Path | None,
+) -> list[tuple[str, str]]:
+    """解析 Compose 服务中需要备份/恢复的卷名。
+
+    依次尝试：1) docker inspect 获取实际卷名；2) compose config 静态解析。
+
+    Returns:
+        [(实际卷名, 备份文件名), ...]
+    """
+    config = docker.get_compose_config(cwd=data_dir, env_file=env_file)
+    if not config or not isinstance(config.get("services"), dict):
+        return []
+
+    services = cast(dict[str, dict[str, object]], config["services"])
+    result: list[tuple[str, str]] = []
+
+    for svc_name, (mount_path, filename) in VOLUME_BACKUP_TARGETS.items():
+        if svc_name not in services:
+            continue
+
+        # 优先通过 docker inspect 解析
+        volume_name = docker.get_service_volume(
+            cwd=data_dir, service=svc_name, target=mount_path, env_file=env_file,
+        )
+
+        # 回退到 compose config 静态解析
+        if not volume_name:
+            volumes_config = services[svc_name].get("volumes", [])
+            if isinstance(volumes_config, list):
+                for vol in cast(list[dict[str, str]], volumes_config):
+                    if (
+                        vol
+                        and vol.get("type") == "volume"
+                        and vol.get("target") == mount_path
+                    ):
+                        volume_name = vol.get("source")
+                        break
+
+        if volume_name:
+            result.append((volume_name, filename))
+
+    return result

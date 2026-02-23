@@ -127,7 +127,7 @@ class DockerEnv:
         mirror = mirrors.get(choice, "")
 
         try:
-            import httpx  # lazy import for optional dependency
+            import httpx
 
             resp = httpx.get(
                 "https://get.docker.com", timeout=30, follow_redirects=True
@@ -193,8 +193,6 @@ class DockerEnv:
             _ = self.compose("pull", cwd=cwd, env_file=env_file)
             return True
         except Exception as e:
-            
-
             if is_permission_error(e):
                 raise
             error(f"镜像拉取失败: {e}")
@@ -205,8 +203,6 @@ class DockerEnv:
             _ = self.compose("up", "-d", cwd=cwd, env_file=env_file)
             return True
         except Exception as e:
-            
-
             if is_permission_error(e):
                 raise
             error(f"服务启动失败: {e}")
@@ -217,8 +213,6 @@ class DockerEnv:
             _ = self.compose("down", cwd=cwd, env_file=env_file)
             return True
         except Exception as e:
-            
-
             if is_permission_error(e):
                 raise
             error(f"服务停止失败: {e}")
@@ -229,8 +223,6 @@ class DockerEnv:
             result = self.compose("ps", cwd=cwd, env_file=env_file, capture=True)
             return result.stdout
         except Exception as e:
-            
-
             if is_permission_error(e):
                 raise
             return ""
@@ -242,8 +234,6 @@ class DockerEnv:
             _ = self.compose("restart", service, cwd=cwd, env_file=env_file)
             return True
         except Exception as e:
-            
-
             if is_permission_error(e):
                 raise
             error(f"服务重启失败: {e}")
@@ -270,8 +260,6 @@ class DockerEnv:
                     pass
             return True
         except Exception as e:
-            
-
             if is_permission_error(e):
                 raise
             error(f"镜像拉取失败 {target_image}: {e}")
@@ -303,8 +291,6 @@ class DockerEnv:
             )
             return json.loads(result.stdout)  # pyright: ignore[reportAny]
         except Exception as e:
-            
-
             if is_permission_error(e):
                 raise
             error(f"获取 compose 配置失败: {e}")
@@ -343,8 +329,6 @@ class DockerEnv:
             _ = run_cmd(docker_cmd, check=True)
             return True
         except Exception as e:
-            
-
             if is_permission_error(e):
                 raise
             error(f"容器运行失败: {e}")
@@ -387,8 +371,6 @@ class DockerEnv:
                 if m.get("Destination") == target and m.get("Type") == "volume":
                     return m.get("Name")
         except Exception as e:
-            
-
             if is_permission_error(e):
                 raise
             return None

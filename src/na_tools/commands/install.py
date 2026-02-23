@@ -105,7 +105,10 @@ def install(
             "沙盒镜像拉取失败，可稍后手动拉取: docker pull kromiose/nekro-agent-sandbox"
         )
 
-    # 10. 显示部署结果
+    # 10. 保存到全局配置
+    set_default_data_dir(data_dir_path)
+
+    # 11. 显示部署结果
     env = load_env(env_path)
     expose_port = env.get("NEKRO_EXPOSE_PORT", "8021")
     admin_password = env.get("NEKRO_ADMIN_PASSWORD", "")
@@ -132,8 +135,5 @@ def install(
             "查看状态: na-tools status",
         ]
     )
-
-    # 9.5 保存到全局配置
-    set_default_data_dir(data_dir_path)
 
     print_panel("🎉 部署完成!", "\n".join(result_lines), style="green")

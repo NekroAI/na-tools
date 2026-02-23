@@ -43,17 +43,3 @@ def download_file(filename: str, output: Path) -> bool:
     error(f"所有源均下载失败: {filename}")
     return False
 
-
-def download_url(url: str, output: Path) -> bool:
-    """下载指定 URL 到本地文件。"""
-    output.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        info(f"正在下载 {url} ...")
-        with httpx.Client(timeout=TIMEOUT, follow_redirects=True) as client:
-            resp = client.get(url)
-            _ = resp.raise_for_status()
-        _ = output.write_bytes(resp.content)
-        return True
-    except httpx.HTTPError as e:
-        error(f"下载失败: {e}")
-        return False

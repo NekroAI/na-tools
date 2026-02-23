@@ -38,6 +38,16 @@ def _resolve_ctx_data_dir(ctx: click.Context) -> Path:
     return _resolve_data_dir(cast(str | None, obj.get("data_dir")))
 
 
+def _resolve_config_key(data: dict[str, object], key: str) -> str:
+    """解析配置键：若顶层找不到则尝试 system. 前缀。"""
+    if get_nested(data, key) is not None:
+        return key
+    prefixed = f"system.{key}"
+    if get_nested(data, prefixed) is not None:
+        return prefixed
+    return key
+
+
 @click.group(invoke_without_command=True)
 @click.option("--data-dir", type=click.Path(), default=None, help="数据目录路径")
 @click.pass_context
@@ -143,10 +153,8 @@ def config_get(ctx: click.Context, key: str) -> None:
     """查看配置项的值。"""
     data_dir = _resolve_ctx_data_dir(ctx)
     data = load_na_config(data_dir)
-    value = cast(object, get_nested(data, key))
-    if value is None:
-        # 尝试从 system 下查找
-        value = cast(object, get_nested(data, f"system.{key}"))
+    resolved_key = _resolve_config_key(data, key)
+    value = cast(object, get_nested(data, resolved_key))
 
     if value is None:
         error(f"配置项不存在: {key}")
@@ -177,7 +185,7 @@ def config_set(ctx: click.Context, key: str, value: str) -> None:
             except ValueError:
                 pass
 
-    set_nested(data, key, parsed_value)
+    set_nested(data, _resolve_config_key(data, key), parsed_value)
     save_na_config(data_dir, data)
 
     info("\n修改将在服务重启后生效。")
@@ -232,8 +240,6 @@ def config_show(ctx: click.Context) -> None:
 @with_sudo_fallback
 def config_model(ctx: click.Context, group: str) -> None:
     """交互式配置模型组。"""
-    data_dir = _resolve_ctx_data_dir(ctx)
-    data = load_na_config(data_dir)
     data_dir = _resolve_ctx_data_dir(ctx)
     data = load_na_config(data_dir)
     system = cast(dict[str, object], data.get("system", data))
