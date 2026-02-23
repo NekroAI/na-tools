@@ -1,6 +1,6 @@
 [project]
 name = "na-tools"
-version = "1.0.4"
+dynamic = ["version"]
 description = "Nekro Agent 跨平台自动部署 CLI 工具"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,6 +12,9 @@ na-tools = "na_tools.cli:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/na_tools/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/na_tools"]
