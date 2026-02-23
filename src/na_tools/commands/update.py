@@ -11,12 +11,24 @@ from ..utils.console import error, info, success, warning
 
 
 @click.command()
+@click.pass_context
 @with_sudo_fallback
 @click.option("--data-dir", type=click.Path(), default=None, help="数据目录路径")
 @click.option(
     "--update-sandbox/--no-update-sandbox", default=True, help="是否同时更新沙盒镜像"
 )
-def update(data_dir: str | None, update_sandbox: bool) -> None:
+@click.option(
+    "--backup/--no-backup",
+    "should_backup",
+    default=None,
+    help="更新前是否备份数据 (如果不指定则交互询问)",
+)
+def update(
+    ctx: click.Context,
+    data_dir: str | None,
+    update_sandbox: bool,
+    should_backup: bool | None,
+) -> None:
     """更新 Nekro Agent 到最新版本。"""
     from pathlib import Path
 
@@ -27,6 +39,16 @@ def update(data_dir: str | None, update_sandbox: bool) -> None:
         error(f"未找到已有安装。数据目录: {data_dir_path}")
         info("请先运行 `na-tools install` 安装。")
         raise click.Abort()
+
+    # 备份确认
+    if should_backup is None:
+        should_backup = click.confirm("是否在更新前备份数据？", default=True)
+
+    if should_backup:
+        from .backup import backup as backup_cmd
+
+        info("正在执行更新前备份...")
+        ctx.invoke(backup_cmd, data_dir=data_dir, no_restart=True)
 
     env_path = data_dir_path / ".env"
     if not env_path.exists():
