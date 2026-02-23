@@ -9,6 +9,7 @@ import tempfile
 
 from ..utils.console import confirm, error, info, prompt, success, warning
 from .platform import is_macos, run_cmd
+from ..utils.privilege import is_permission_error
 
 
 def _find_docker() -> str | None:
@@ -192,6 +193,10 @@ class DockerEnv:
             _ = self.compose("pull", cwd=cwd, env_file=env_file)
             return True
         except Exception as e:
+            
+
+            if is_permission_error(e):
+                raise
             error(f"镜像拉取失败: {e}")
             return False
 
@@ -200,6 +205,10 @@ class DockerEnv:
             _ = self.compose("up", "-d", cwd=cwd, env_file=env_file)
             return True
         except Exception as e:
+            
+
+            if is_permission_error(e):
+                raise
             error(f"服务启动失败: {e}")
             return False
 
@@ -208,6 +217,10 @@ class DockerEnv:
             _ = self.compose("down", cwd=cwd, env_file=env_file)
             return True
         except Exception as e:
+            
+
+            if is_permission_error(e):
+                raise
             error(f"服务停止失败: {e}")
             return False
 
@@ -215,7 +228,11 @@ class DockerEnv:
         try:
             result = self.compose("ps", cwd=cwd, env_file=env_file, capture=True)
             return result.stdout
-        except Exception:
+        except Exception as e:
+            
+
+            if is_permission_error(e):
+                raise
             return ""
 
     def restart_service(
@@ -225,6 +242,10 @@ class DockerEnv:
             _ = self.compose("restart", service, cwd=cwd, env_file=env_file)
             return True
         except Exception as e:
+            
+
+            if is_permission_error(e):
+                raise
             error(f"服务重启失败: {e}")
             return False
 
@@ -241,13 +262,7 @@ class DockerEnv:
 
         docker_path: str = self.docker_path
         try:
-            _ = run_cmd([docker_path, "pull", target_image])
-            # 如果是镜像站拉取的，tag回来，保证原名可用（可选，但在 na-tools 场景下通常不需要，因为我们是 compose up）
-            # 但对于 sandbox 这种直接 docker run 的，或者后续可能引用的，tag 回来比较保险？
-            # 这里的 sandbox 是通过 docker run 运行的吗？
-            # 查一下 sandbox 用法。目前只看到 docker_pull。
-            # 假设 sandbox 只是 pull 下来备用，或者 user 手动 run。
-            # 如果 user 手动 run original name，docker 会找不到。
+            _ = run_cmd([docker_path, "pull", target_image], check=True)
             if mirror:
                 try:
                     _ = run_cmd([docker_path, "tag", target_image, image])
@@ -255,6 +270,10 @@ class DockerEnv:
                     pass
             return True
         except Exception as e:
+            
+
+            if is_permission_error(e):
+                raise
             error(f"镜像拉取失败 {target_image}: {e}")
             return False
 
@@ -284,6 +303,10 @@ class DockerEnv:
             )
             return json.loads(result.stdout)  # pyright: ignore[reportAny]
         except Exception as e:
+            
+
+            if is_permission_error(e):
+                raise
             error(f"获取 compose 配置失败: {e}")
             return None
 
@@ -320,6 +343,10 @@ class DockerEnv:
             _ = run_cmd(docker_cmd, check=True)
             return True
         except Exception as e:
+            
+
+            if is_permission_error(e):
+                raise
             error(f"容器运行失败: {e}")
             return False
 
@@ -359,6 +386,10 @@ class DockerEnv:
             for m in mounts:
                 if m.get("Destination") == target and m.get("Type") == "volume":
                     return m.get("Name")
-        except Exception:
+        except Exception as e:
+            
+
+            if is_permission_error(e):
+                raise
             return None
         return None
