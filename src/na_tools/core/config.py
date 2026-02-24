@@ -3,7 +3,7 @@
 from pathlib import Path
 
 
-from ..utils.console import info, prompt, success
+from ..utils.console import info, prompt, success, warning
 from ..utils.crypto import random_string
 from ..utils.network import download_file
 
@@ -107,9 +107,15 @@ def setup_env(
     if with_napcat:
         if interactive:
             default_napcat = env.get("NAPCAT_EXPOSE_PORT", "6099")
-            env["NAPCAT_EXPOSE_PORT"] = prompt(
-                "请设置 NapCat 端口", default=default_napcat
-            )
+            while True:
+                env["NAPCAT_EXPOSE_PORT"] = prompt(
+                    "请设置 NapCat 端口", default=default_napcat
+                )
+                # 检查是否与服务端口相同
+                if env["NAPCAT_EXPOSE_PORT"] == env.get("NEKRO_EXPOSE_PORT"):
+                    warning("NapCat 端口不能与服务端口相同，请重新输入")
+                    continue
+                break
         if not env.get("NAPCAT_EXPOSE_PORT"):
             env["NAPCAT_EXPOSE_PORT"] = "6099"
 

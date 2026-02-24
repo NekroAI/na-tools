@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 from pathlib import Path
 
-from ..utils.console import info, success
+from ..utils.console import info, success, confirm, prompt
 from ..utils.network import download_file
 
 if TYPE_CHECKING:
@@ -114,6 +114,9 @@ def apply_mirror_to_compose(data_dir: Path, mirror: str) -> None:
 def patch_compose_isolation(data_dir: Path) -> None:
     """修补 docker-compose.yml 以移除硬编码的容器名和卷名，避免冲突。
 
+    先检测是否存在冲突容器（硬编码 container_name），如果没有则不做修改。
+    如果有，询问用户是否要添加前缀来隔离。
+
     Args:
         data_dir: 数据目录。
     """
@@ -130,30 +133,60 @@ def patch_compose_isolation(data_dir: Path) -> None:
         return
 
     data = cast(dict[str, object], content)
-    modified = False
 
-    # 1. 移除 services 下的 container_name
+    # 1. 检测是否存在硬编码的 container_name
     services = cast(dict[str, dict[str, object]], data.get("services", {}))
+    container_names_to_patch: dict[str, str] = {}
+
     for service_name, service_config in services.items():
         if "container_name" in service_config:
-            del service_config["container_name"]
-            modified = True
-            info(f"  已移除服务 {service_name} 的 container_name")
+            container_name = service_config["container_name"]
+            if isinstance(container_name, str):
+                container_names_to_patch[service_name] = container_name
 
-    # 2. 移除 volumes 下的 name (让 docker compose 自动生成)
+    # 如果没有硬编码的 container_name，则不做任何修改
+    if not container_names_to_patch:
+        info("检测到 docker-compose.yml 中无硬编码容器名，无需修改")
+        return
+
+    # 有冲突容器，询问用户是否要添加前缀
+    info(f"检测到 {len(container_names_to_patch)} 个硬编码容器名：")
+    for service_name, container_name in container_names_to_patch.items():
+        info(f"  - {service_name}: {container_name}")
+
+    if not confirm("是否要添加前缀来隔离这些容器?", default=True):
+        return
+
+    # 获取前缀（默认为 "na"）
+    prefix = prompt("请输入容器名前缀", default="na")
+    if not prefix:
+        prefix = "na"
+
+    modified = False
+
+    # 2. 为 services 下的 container_name 添加前缀
+    for service_name, old_container_name in container_names_to_patch.items():
+        new_container_name = f"{prefix}_{old_container_name}"
+        services[service_name]["container_name"] = new_container_name
+        modified = True
+        info(f"  已修改服务 {service_name} 的容器名: {old_container_name} -> {new_container_name}")
+
+    # 3. 为 volumes 下的 name 添加前缀
     volumes = cast(dict[str, dict[str, object] | None], data.get("volumes", {}))
     if volumes:
         for volume_name, volume_config in volumes.items():
-            if volume_config:
-                if "name" in volume_config:
-                    del volume_config["name"]
+            if volume_config and "name" in volume_config:
+                old_name = volume_config["name"]
+                if isinstance(old_name, str):
+                    new_name = f"{prefix}_{old_name}"
+                    volume_config["name"] = new_name
                     modified = True
-                    info(f"  已移除卷 {volume_name} 的显式 name")
+                    info(f"  已修改卷 {volume_name} 的名称: {old_name} -> {new_name}")
 
     if modified:
         with open(compose_path, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
-        success("已更新 docker-compose.yml 以支持多实例部署")
+        success(f"已更新 docker-compose.yml，使用前缀 '{prefix}' 隔离容器")
 
 
 def resolve_service_volumes(
