@@ -1,5 +1,7 @@
 """status 命令：查看服务状态。"""
 
+from pathlib import Path
+
 import click
 
 from ..core.compose import compose_exists
@@ -14,8 +16,6 @@ from ..utils.console import console, error, info
 @click.option("--data-dir", type=click.Path(), default=None, help="数据目录路径")
 def status(data_dir: str | None) -> None:
     """查看 Nekro Agent 服务状态。"""
-    from pathlib import Path
-
     data_dir_path = Path(data_dir or default_data_dir()).expanduser().resolve()
 
     if not compose_exists(data_dir_path):

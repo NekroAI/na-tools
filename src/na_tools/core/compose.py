@@ -112,81 +112,66 @@ def apply_mirror_to_compose(data_dir: Path, mirror: str) -> None:
 
 
 def patch_compose_isolation(data_dir: Path) -> None:
-    """修补 docker-compose.yml 以移除硬编码的容器名和卷名，避免冲突。
+    """检测容器名冲突并通过 INSTANCE_NAME 环境变量实现多实例隔离。
 
-    先检测是否存在冲突容器（硬编码 container_name），如果没有则不做修改。
-    如果有，询问用户是否要添加前缀来隔离。
+    compose 文件已使用 ${INSTANCE_NAME:-} 作为容器名、卷名、网络名前缀，
+    仅需在 .env 中设置 INSTANCE_NAME 即可完成隔离，无需修改 YAML。
 
     Args:
         data_dir: 数据目录。
     """
-    import yaml
+    import shutil
 
-    compose_path = data_dir / COMPOSE_FILE
-    if not compose_path.exists():
+    from .config import load_env, save_env
+    from .platform import run_cmd
+
+    env_path = data_dir / ".env"
+    env = load_env(env_path)
+
+    # 已设置 INSTANCE_NAME，无需处理
+    if env.get("INSTANCE_NAME"):
+        info(f"已配置实例名称前缀: {env['INSTANCE_NAME']}")
         return
 
-    with open(compose_path, encoding="utf-8") as f:
-        content = yaml.safe_load(f)  # pyright: ignore[reportAny]
-
-    if not isinstance(content, dict):
+    # 检测是否存在同名容器
+    docker_path = shutil.which("docker")
+    if not docker_path:
         return
 
-    data = cast(dict[str, object], content)
-
-    # 1. 检测是否存在硬编码的 container_name
-    services = cast(dict[str, dict[str, object]], data.get("services", {}))
-    container_names_to_patch: dict[str, str] = {}
-
-    for service_name, service_config in services.items():
-        if "container_name" in service_config:
-            container_name = service_config["container_name"]
-            if isinstance(container_name, str):
-                container_names_to_patch[service_name] = container_name
-
-    # 如果没有硬编码的 container_name，则不做任何修改
-    if not container_names_to_patch:
-        info("检测到 docker-compose.yml 中无硬编码容器名，无需修改")
+    try:
+        result = run_cmd(
+            [docker_path, "ps", "-a", "--format", "{{.Names}}"],
+            capture=True,
+            check=False,
+        )
+        existing_names = set(result.stdout.strip().splitlines())
+    except Exception:
         return
 
-    # 有冲突容器，询问用户是否要添加前缀
-    info(f"检测到 {len(container_names_to_patch)} 个硬编码容器名：")
-    for service_name, container_name in container_names_to_patch.items():
-        info(f"  - {service_name}: {container_name}")
+    default_names = {"nekro_agent", "nekro_postgres", "nekro_qdrant", "nekro_napcat"}
+    conflicts = default_names & existing_names
 
-    if not confirm("是否要添加前缀来隔离这些容器?", default=True):
+    if not conflicts:
         return
 
-    # 获取前缀（默认为 "na"）
-    prefix = prompt("请输入容器名前缀", default="na")
+    info(f"检测到 {len(conflicts)} 个同名容器已存在：")
+    for name in sorted(conflicts):
+        info(f"  - {name}")
+
+    if not confirm("是否设置实例名称前缀来隔离?", default=True):
+        return
+
+    prefix = prompt("请输入实例名称前缀", default="na")
     if not prefix:
         prefix = "na"
 
-    modified = False
+    # 确保前缀以 _ 结尾，与 compose 模板 ${INSTANCE_NAME:-}xxx 拼接
+    if not prefix.endswith("_"):
+        prefix = f"{prefix}_"
 
-    # 2. 为 services 下的 container_name 添加前缀
-    for service_name, old_container_name in container_names_to_patch.items():
-        new_container_name = f"{prefix}_{old_container_name}"
-        services[service_name]["container_name"] = new_container_name
-        modified = True
-        info(f"  已修改服务 {service_name} 的容器名: {old_container_name} -> {new_container_name}")
-
-    # 3. 为 volumes 下的 name 添加前缀
-    volumes = cast(dict[str, dict[str, object] | None], data.get("volumes", {}))
-    if volumes:
-        for volume_name, volume_config in volumes.items():
-            if volume_config and "name" in volume_config:
-                old_name = volume_config["name"]
-                if isinstance(old_name, str):
-                    new_name = f"{prefix}_{old_name}"
-                    volume_config["name"] = new_name
-                    modified = True
-                    info(f"  已修改卷 {volume_name} 的名称: {old_name} -> {new_name}")
-
-    if modified:
-        with open(compose_path, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
-        success(f"已更新 docker-compose.yml，使用前缀 '{prefix}' 隔离容器")
+    env["INSTANCE_NAME"] = prefix
+    save_env(env_path, env)
+    success(f"已设置 INSTANCE_NAME={prefix}，容器将使用前缀隔离")
 
 
 def resolve_service_volumes(

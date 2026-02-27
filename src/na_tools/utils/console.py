@@ -39,7 +39,7 @@ def confirm(msg: str, default: bool = False) -> bool:
 
 
 def prompt(msg: str, default: str = "") -> str:
-    return Prompt.ask(msg, default=default or None, console=console) or default
+    return Prompt.ask(msg, default=default, console=console)
 
 
 def print_panel(title: str, content: str, style: str = "cyan") -> None:

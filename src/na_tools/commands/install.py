@@ -1,5 +1,7 @@
 """install 命令：全新安装 Nekro Agent。"""
 
+from pathlib import Path
+
 import click
 
 from ..core.compose import (
@@ -30,8 +32,6 @@ def install(
     non_interactive: bool,
 ) -> None:
     """安装 Nekro Agent 服务。"""
-    from pathlib import Path
-
     interactive = not non_interactive
 
     info("=== Nekro Agent 安装向导 ===")

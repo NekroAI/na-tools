@@ -5,6 +5,7 @@ from typing import cast
 
 import click
 
+from ..core.config import get_service_name
 from ..core.docker import DockerEnv
 from ..utils.privilege import with_sudo_fallback
 from ..core.na_config import (
@@ -78,7 +79,6 @@ def _interactive_wizard(data_dir_str: str | None) -> None:
     info("=== Nekro Agent 快捷配置向导 ===")
 
     # 1. 模型 API 配置
-    # 1. 模型 API 配置
     info("\n📦 步骤 1/3: 模型 API 配置")
     system = cast(dict[str, object], data.get("system", data))
     groups = cast(dict[str, object], system.get("MODEL_GROUPS", {}))
@@ -136,7 +136,7 @@ def _interactive_wizard(data_dir_str: str | None) -> None:
         docker = DockerEnv()
         env_path = data_dir / ".env"
         if docker.restart_service(
-            "nekro_agent",
+            get_service_name("nekro_agent"),
             cwd=data_dir,
             env_file=env_path if env_path.exists() else None,
         ):
@@ -273,7 +273,7 @@ def config_model(ctx: click.Context, group: str) -> None:
         docker = DockerEnv()
         env_path = data_dir / ".env"
         if docker.restart_service(
-            "nekro_agent",
+            get_service_name("nekro_agent"),
             cwd=data_dir,
             env_file=env_path if env_path.exists() else None,
         ):

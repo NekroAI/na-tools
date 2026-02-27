@@ -2,14 +2,11 @@
 
 import click
 from pathlib import Path
+from typing import cast
 
 from ..core.platform import set_default_data_dir, load_global_config
 from ..core.compose import compose_exists
 from ..utils.console import success, info, error
-
-
-from typing import cast
-
 from ..utils.privilege import with_sudo_fallback
 
 
@@ -49,7 +46,9 @@ def use(data_dir: str) -> None:
         return
 
     if not compose_exists(path):
-        error(f"该目录不是有效的 Nekro Agent 数据目录（缺少 docker-compose.yml）: {path}")
+        error(
+            f"该目录不是有效的 Nekro Agent 数据目录（缺少 docker-compose.yml）: {path}"
+        )
         return
 
     set_default_data_dir(path)

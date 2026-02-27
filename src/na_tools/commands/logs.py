@@ -1,8 +1,11 @@
 """logs 命令：查看服务日志。"""
 
+from pathlib import Path
+
 import click
 
 from ..core.compose import compose_exists
+from ..core.config import get_service_name
 from ..core.docker import DockerEnv
 from ..core.platform import default_data_dir
 from ..utils.privilege import with_sudo_fallback
@@ -20,8 +23,6 @@ def logs(service: str, data_dir: str | None, follow: bool, tail: int) -> None:
 
     SERVICE: 服务名称，默认 nekro_agent。可选: nekro_postgres, nekro_qdrant, nekro_napcat
     """
-    from pathlib import Path
-
     data_dir_path = Path(data_dir or default_data_dir()).expanduser().resolve()
 
     if not compose_exists(data_dir_path):
@@ -35,7 +36,7 @@ def logs(service: str, data_dir: str | None, follow: bool, tail: int) -> None:
 
     env_path = data_dir_path / ".env"
     docker.logs(
-        service,
+        get_service_name(service),
         cwd=data_dir_path,
         follow=follow,
         tail=tail,

@@ -10,7 +10,7 @@ from ..core.compose import compose_exists, resolve_service_volumes
 from ..core.docker import DockerEnv
 from ..core.platform import default_data_dir, get_global_config_dir
 from ..utils.privilege import with_sudo_fallback
-from ..utils.console import error, info, success, warning
+from ..utils.console import console, error, info, success, warning
 
 
 @click.group(invoke_without_command=True)
@@ -25,7 +25,7 @@ def backup(
     ctx: click.Context, data_dir: str | None, output: str | None, no_restart: bool
 ) -> None:
     """备份 Nekro Agent 数据和配置。"""
-    ctx.ensure_object(dict)
+    _ = ctx.ensure_object(dict)
     ctx.obj["data_dir"] = data_dir
 
     if ctx.invoked_subcommand is not None:
@@ -59,7 +59,9 @@ def backup(
 
     if compose_exists(data_dir_path) and docker.compose_installed:
         env_file = env_path if env_path.exists() else None
-        for vol_name, filename in resolve_service_volumes(docker, data_dir_path, env_file):
+        for vol_name, filename in resolve_service_volumes(
+            docker, data_dir_path, env_file
+        ):
             volume_backups_map.append((vol_name, filename, volumes_dir / filename))
 
     # 停止服务
@@ -168,6 +170,6 @@ def list_backups(ctx: click.Context) -> None:
     info("发现以下历史备份：")
     for i, b in enumerate(backups, 1):
         mtime = datetime.fromtimestamp(b.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
-        click.echo(
+        console.print(
             f"  [{i}] {b.name} (备份时间: {mtime}, 大小: {b.stat().st_size / 1024 / 1024:.1f} MB)"
         )

@@ -9,7 +9,7 @@ from ..core.compose import resolve_service_volumes
 from ..core.docker import DockerEnv
 from ..core.platform import default_data_dir, get_global_config_dir
 from ..utils.privilege import with_sudo_fallback
-from ..utils.console import confirm, error, info, success, warning
+from ..utils.console import confirm, console, error, info, success, warning
 
 
 @click.command()
@@ -34,20 +34,22 @@ def restore(backup_file: str | None, data_dir: str | None) -> None:
             )
 
         if not backups:
-            ctx = click.get_current_context()
+            ctx = click.get_current_context(silent=True)
             error(
                 "缺少参数 'BACKUP_FILE'。必须提供备份文件路径，且默认备份目录中未找到任何备份。"
             )
             info("示例: na-tools restore ./na_backup_20240101.tar.gz\n")
-            click.echo(ctx.get_help())
-            ctx.exit(1)
+            if ctx:
+                click.echo(ctx.get_help())
+                ctx.exit(1)
+            raise click.Abort()
 
         info("发现以下历史备份：")
         for i, b in enumerate(backups, 1):
             mtime = datetime.fromtimestamp(b.stat().st_mtime).strftime(
                 "%Y-%m-%d %H:%M:%S"
             )
-            click.echo(
+            console.print(
                 f"  [{i}] {b.name} (备份时间: {mtime}, 大小: {b.stat().st_size / 1024 / 1024:.1f} MB)"
             )
 

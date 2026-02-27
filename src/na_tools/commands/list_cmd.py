@@ -2,13 +2,10 @@
 
 import click
 from datetime import datetime
+from typing import cast
 
 from ..core.platform import load_global_config
 from ..utils.console import console
-
-
-from typing import cast
-
 from ..utils.privilege import with_sudo_fallback
 
 

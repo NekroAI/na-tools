@@ -50,10 +50,12 @@ def get_nested(data: dict[str, object], key_path: str) -> object | None:
     示例: get_nested(data, "MODEL_GROUPS.default.API_KEY")
     """
     keys = key_path.split(".")
-    current = data
+    current: object = data
     for key in keys:
-        if current and key in current:
-            current = current[key]
+        if isinstance(current, dict) and key in current:
+            current_dict = cast(dict[str, object], current)  # pyright: ignore[reportUnnecessaryCast]
+            val: object = current_dict[key]
+            current = val
         else:
             return None
     return current

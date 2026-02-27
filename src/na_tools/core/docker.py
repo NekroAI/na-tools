@@ -126,16 +126,32 @@ class DockerEnv:
         choice = prompt("请输入选项", default="1")
         mirror = mirrors.get(choice, "")
 
-        try:
-            import httpx
+        import httpx
 
-            resp = httpx.get(
-                "https://get.docker.com", timeout=30, follow_redirects=True
+        urls = [
+            "https://get.docker.com",
+            "https://ghproxy.net/https://raw.githubusercontent.com/docker/docker-install/master/install.sh",
+            "https://cdn.jsdelivr.net/gh/docker/docker-install@master/install.sh",
+        ]
+
+        script = None
+        last_error = None
+        for url in urls:
+            try:
+                info(f"尝试从 {url} 下载安装脚本...")
+                resp = httpx.get(url, timeout=30, follow_redirects=True)
+                _ = resp.raise_for_status()
+                script = resp.text
+                break
+            except Exception as e:
+                last_error = e
+
+        if not script:
+            error(f"Docker 安装脚本下载失败: {last_error}")
+            info("由于网络限制，您可能需要手动安装 Docker：")
+            info(
+                "curl -fsSL https://get.docker.com | sudo bash -s docker --mirror Aliyun"
             )
-            _ = resp.raise_for_status()
-            script = resp.text
-        except Exception as e:
-            error(f"Docker 安装脚本下载失败: {e}")
             return False
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False) as f:

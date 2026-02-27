@@ -12,6 +12,7 @@ from .commands.status import status
 from .commands.update import update
 from .commands.use import use
 from .commands.list_cmd import list_cmd
+from .commands.napcat import napcat
 
 
 @click.group()
@@ -33,6 +34,7 @@ main.add_command(status)
 main.add_command(logs)
 main.add_command(use)
 main.add_command(list_cmd)
+main.add_command(napcat)
 
 
 if __name__ == "__main__":

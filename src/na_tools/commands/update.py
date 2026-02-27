@@ -1,5 +1,7 @@
 """update 命令：更新 Nekro Agent 服务。"""
 
+from pathlib import Path
+
 import click
 
 from ..core.compose import compose_exists
@@ -7,7 +9,7 @@ from ..core.config import load_env
 from ..core.docker import DockerEnv
 from ..core.platform import default_data_dir
 from ..utils.privilege import with_sudo_fallback
-from ..utils.console import error, info, success, warning
+from ..utils.console import confirm, error, info, success, warning
 
 
 @click.command()
@@ -30,8 +32,6 @@ def update(
     should_backup: bool | None,
 ) -> None:
     """更新 Nekro Agent 到最新版本。"""
-    from pathlib import Path
-
     data_dir_path = Path(data_dir or default_data_dir()).expanduser().resolve()
 
     # 验证现有安装
@@ -42,7 +42,7 @@ def update(
 
     # 备份确认
     if should_backup is None:
-        should_backup = click.confirm("是否在更新前备份数据？", default=True)
+        should_backup = confirm("是否在更新前备份数据？", default=True)
 
     if should_backup:
         from .backup import backup as backup_cmd

@@ -96,7 +96,7 @@ def default_data_dir() -> Path:
             return Path(current)
 
     # 2. 回退到硬编码默认值
-    return Path.home() / "srv" /"nekro_agent"
+    return Path.home() / "srv" / "nekro_agent"
 
 
 def run_cmd(

@@ -56,6 +56,39 @@ def save_env(env_path: Path, data: dict[str, str]) -> None:
     _ = env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def get_container_name(service: str, env: dict[str, str]) -> str:
+    """根据 INSTANCE_NAME 前缀生成实际容器名（用于 Docker 网络内部通信）。
+
+    仅用于 Docker 网络内通过容器 hostname 通信的场景，例如构建 WebSocket URL。
+    对于 ``docker compose restart/logs`` 等命令，请使用 :func:`get_service_name`。
+
+    Args:
+        service: 基础服务名，如 ``nekro_agent``。
+        env: 已加载的 .env 字典。
+
+    Returns:
+        拼接了 INSTANCE_NAME 前缀的容器名，如 ``na_nekro_agent``。
+    """
+    prefix = env.get("INSTANCE_NAME", "")
+    return f"{prefix}{service}"
+
+
+def get_service_name(service: str) -> str:
+    """返回 compose 文件中的 service 名（YAML key）。
+
+    ``docker compose restart/logs`` 等命令接受的是 compose 文件里的 service 名，
+    即 YAML key（如 ``nekro_agent``），而非带前缀的容器名。
+    INSTANCE_NAME 前缀只影响容器名，不影响 service 名，因此直接返回原始 service。
+
+    Args:
+        service: 基础服务名，如 ``nekro_agent``。
+
+    Returns:
+        compose service 名，与 ``service`` 参数相同。
+    """
+    return service
+
+
 def download_env_example(data_dir: Path) -> bool:
     """下载 .env.example 模板到数据目录。"""
     return download_file(ENV_EXAMPLE_FILENAME, data_dir / ENV_EXAMPLE_FILENAME)
