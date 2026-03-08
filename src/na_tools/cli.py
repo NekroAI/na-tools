@@ -4,9 +4,11 @@ import click
 
 from . import __version__
 from .commands.backup import backup
+from .commands.bind import bind
 from .commands.config_cmd import config
 from .commands.install import install
 from .commands.logs import logs
+from .commands.remove import remove
 from .commands.restore import restore
 from .commands.status import status
 from .commands.update import update
@@ -26,6 +28,8 @@ def main() -> None:
 
 
 main.add_command(install)
+main.add_command(bind)
+main.add_command(remove)
 main.add_command(update)
 main.add_command(backup)
 main.add_command(restore)
