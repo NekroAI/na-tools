@@ -19,6 +19,8 @@ uv sync
 | 命令 | 说明 |
 |------|------|
 | `na-tools install` | 安装 Nekro Agent（Docker 检测 → 配置 → 部署） |
+| `na-tools bind` | 绑定已安装的 NA 实例到管理列表 |
+| `na-tools remove` | 卸载并移除指定的 NA 实例 |
 | `na-tools update` | 更新服务到最新版本 |
 | `na-tools backup` | 备份数据和配置 |
 | `na-tools restore [file]` | 从备份恢复（不指定文件则从列表选择） |
@@ -34,6 +36,9 @@ uv sync
 # 一键安装
 na-tools install
 
+# 绑定已安装的 NA 实例（适用于从其他方式安装的或迁移的 NA）
+na-tools bind --data-dir /path/to/nekro_data
+
 # 配置模型 API
 na-tools config model
 
@@ -48,6 +53,9 @@ na-tools backup
 
 # 恢复备份（交互式选择）
 na-tools restore
+
+# 移除 NA 实例（保留数据目录）
+na-tools remove --keep-data
 
 # 查看多开或所有安装实例
 na-tools list
