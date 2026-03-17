@@ -8,9 +8,8 @@ from ..core.compose import compose_exists
 from ..core.platform import (
     load_global_config,
     save_global_config,
-    set_default_data_dir,
 )
-from ..utils.console import confirm, error, info, success, warning
+from ..utils.console import confirm, error, info, prompt, success
 from ..utils.privilege import with_sudo_fallback
 
 
@@ -19,8 +18,8 @@ from ..utils.privilege import with_sudo_fallback
 @click.option(
     "--data-dir",
     type=click.Path(),
-    required=True,
-    help="NA 实例的数据目录路径",
+    default=None,
+    help="NA 实例的数据目录路径（未指定时交互式输入）",
 )
 @click.option(
     "--name",
@@ -30,10 +29,10 @@ from ..utils.privilege import with_sudo_fallback
 )
 @click.option(
     "--as-current/--no-as-current",
-    default=True,
-    help="绑定后是否设为当前激活实例（默认设为当前）",
+    default=None,
+    help="绑定后是否设为当前激活实例",
 )
-def bind(data_dir: str, name: str | None, as_current: bool) -> None:
+def bind(data_dir: str | None, name: str | None, as_current: bool | None) -> None:
     """将环境中已手动安装的 NA 实例绑定到 na-tools 管理列表。
 
     适用于：
@@ -44,8 +43,22 @@ def bind(data_dir: str, name: str | None, as_current: bool) -> None:
     示例：
         na-tools bind --data-dir /path/to/nekro_data
         na-tools bind --data-dir /path/to/nekro_data --name my-na
+        na-tools bind  # 交互式输入
     """
+    # 交互式输入：data-dir
+    if data_dir is None:
+        data_dir = prompt("请输入 NA 实例的数据目录路径")
+        if not data_dir.strip():
+            error("数据目录路径不能为空")
+            raise click.Abort()
+
     data_dir_path = Path(data_dir).expanduser().resolve()
+
+    # 交互式输入：name（仅在未通过参数指定时询问）
+    if name is None:
+        input_name = prompt("为该实例指定一个名称（直接回车跳过）")
+        if input_name.strip():
+            name = input_name.strip()
 
     # 1. 验证目录存在
     if not data_dir_path.exists():
@@ -69,6 +82,8 @@ def bind(data_dir: str, name: str | None, as_current: bool) -> None:
 
     if str_path in installations:
         info(f"该 NA 实例已在管理列表中: {str_path}")
+        if as_current is None:
+            as_current = confirm("是否将其设为当前激活实例?", default=True)
         if as_current:
             config["current_data_dir"] = str_path
             save_global_config(config)
@@ -88,6 +103,10 @@ def bind(data_dir: str, name: str | None, as_current: bool) -> None:
 
     installations[str_path] = install_info
     config["installations"] = installations
+
+    # 交互式输入：as-current（仅在未通过参数指定时询问）
+    if as_current is None:
+        as_current = confirm("是否将其设为当前激活实例?", default=True)
 
     if as_current:
         config["current_data_dir"] = str_path

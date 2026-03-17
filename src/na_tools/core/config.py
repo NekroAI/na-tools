@@ -154,8 +154,11 @@ def setup_env(
 
     # 镜像站配置
     if interactive and not env.get("MIRROR_REGISTRY"):
+        from .platform import get_global_mirror
+
+        global_mirror = get_global_mirror()
         env["MIRROR_REGISTRY"] = prompt(
-            "Docker 镜像站 (可选, e.g. docker.1ms.run)", default=""
+            "Docker 镜像站 (可选, e.g. docker.1ms.run)", default=global_mirror
         )
 
     # 自动生成安全随机值

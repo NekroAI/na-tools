@@ -12,7 +12,7 @@ from ..core.compose import (
 
 from ..core.config import load_env, setup_env
 from ..core.docker import DockerEnv
-from ..core.platform import default_data_dir, set_default_data_dir
+from ..core.platform import default_data_dir, resolve_mirror, set_default_data_dir
 from ..utils.privilege import with_sudo_fallback
 from ..utils.console import confirm, error, info, print_panel, prompt, warning
 
@@ -80,8 +80,7 @@ def install(
     patch_compose_isolation(data_dir_path)
 
     # 6. 配置镜像站
-    env = load_env(env_path)
-    mirror = env.get("MIRROR_REGISTRY", "")
+    mirror = resolve_mirror(env_path)
     if mirror:
         info(f"应用镜像站配置: {mirror}")
         apply_mirror_to_compose(data_dir_path, mirror)

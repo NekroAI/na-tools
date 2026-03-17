@@ -99,6 +99,32 @@ def default_data_dir() -> Path:
     return Path.home() / "srv" / "nekro_agent"
 
 
+def get_global_mirror() -> str:
+    """返回全局镜像源，未配置时返回空字符串。"""
+    config = load_global_config()
+    mirror = config.get("mirror_registry", "")
+    return str(mirror) if isinstance(mirror, str) else ""
+
+
+def set_global_mirror(mirror: str) -> None:
+    """设置全局镜像源。"""
+    config = load_global_config()
+    config["mirror_registry"] = mirror
+    save_global_config(config)
+
+
+def resolve_mirror(env_path: Path | None = None) -> str:
+    """统一解析镜像源。优先级：实例 .env MIRROR_REGISTRY > 全局 mirror_registry。"""
+    if env_path and env_path.exists():
+        from .config import load_env
+
+        env = load_env(env_path)
+        instance_mirror = env.get("MIRROR_REGISTRY", "")
+        if instance_mirror:
+            return instance_mirror
+    return get_global_mirror()
+
+
 def run_cmd(
     cmd: list[str],
     *,

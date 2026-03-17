@@ -7,7 +7,7 @@ import click
 
 from ..core.compose import resolve_service_volumes
 from ..core.docker import DockerEnv
-from ..core.platform import default_data_dir, get_global_config_dir
+from ..core.platform import default_data_dir, get_global_config_dir, resolve_mirror
 from ..utils.privilege import with_sudo_fallback
 from ..utils.console import confirm, console, error, info, success, warning
 
@@ -146,6 +146,9 @@ def restore(backup_file: str | None, data_dir: str | None) -> None:
                         )
 
                         env_file = env_path if env_path.exists() else None
+                        # 解析镜像源
+                        mirror = resolve_mirror(env_path if env_path.exists() else None)
+                        alpine_image = f"{mirror}/alpine:latest" if mirror else "alpine:latest"
                         # 建立 备份文件名 -> 卷名 的映射
                         volume_map = {
                             filename: vol_name
@@ -162,7 +165,7 @@ def restore(backup_file: str | None, data_dir: str | None) -> None:
                                 )
 
                                 success_restore = docker.run_ephemeral(
-                                    image="alpine:latest",
+                                    image=alpine_image,
                                     cmd=[
                                         "tar",
                                         "xzf",
