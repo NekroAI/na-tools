@@ -1,5 +1,6 @@
 """backup 命令：备份 Nekro Agent 数据。"""
 
+import shutil
 import tarfile
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,26 @@ from ..core.docker import DockerEnv
 from ..core.platform import default_data_dir, get_global_config_dir, resolve_mirror
 from ..utils.privilege import with_sudo_fallback
 from ..utils.console import console, error, info, success, warning
+
+# 备份时排除的缓存/临时文件模式
+_CACHE_PATTERNS: list[str] = [
+    "napcat_data/QQ/nt_qq/*/nt_data/Log",  # napcat QQ 日志
+    "napcat_data/QQ/nt_qq/*/nt_temp",  # napcat 临时文件
+    "napcat_data/QQ/Crashpad",  # 崩溃转储
+    "logs",  # 所有日志
+]
+
+
+def _is_cache_path(arcname: str) -> bool:
+    """判断归档路径是否匹配缓存模式（支持通配符 *）。"""
+    from fnmatch import fnmatch
+
+    # arcname 格式: "data_dir_name/napcat_data/QQ/..."，跳过第一段
+    parts = arcname.split("/", 1)
+    if len(parts) < 2:
+        return False
+    rel = parts[1]
+    return any(fnmatch(rel, pat) or fnmatch(rel, pat + "/*") for pat in _CACHE_PATTERNS)
 
 
 @click.group(invoke_without_command=True)
@@ -79,17 +100,22 @@ def backup(
     volume_backups: list[Path] = []
     if volume_backups_map:
         mirror = resolve_mirror(env_path if env_path.exists() else None)
-        alpine_image = f"{mirror}/alpine:latest" if mirror else "alpine:latest"
+        alpine_images = [f"{mirror}/alpine:latest", "alpine:latest"] if mirror else ["alpine:latest"]
         volumes_dir.mkdir(exist_ok=True)
         for vol_name, filename, backup_file in volume_backups_map:
             info(f"正在备份存储卷 {vol_name}...")
 
-            # 使用 alpine 打包
-            success_backup = docker.run_ephemeral(
-                image=alpine_image,
-                cmd=["tar", "czf", f"/backup/{filename}", "-C", "/data", "."],
-                volumes={vol_name: "/data", str(volumes_dir): "/backup"},
-            )
+            success_backup = False
+            for img in alpine_images:
+                success_backup = docker.run_ephemeral(
+                    image=img,
+                    cmd=["tar", "czf", f"/backup/{filename}", "-C", "/data", "."],
+                    volumes={vol_name: "/data", str(volumes_dir): "/backup"},
+                )
+                if success_backup:
+                    break
+                if img != alpine_images[-1]:
+                    warning(f"镜像 {img} 拉取失败，尝试回退...")
 
             if success_backup:
                 volume_backups.append(backup_file)
@@ -99,13 +125,24 @@ def backup(
 
     # 打包数据
     info(f"正在备份数据到: {backup_path}")
+    skipped_cache = 0
+
+    def _tar_filter(ti: tarfile.TarInfo) -> tarfile.TarInfo | None:
+        nonlocal skipped_cache
+        if "volumes_backup_tmp" in ti.name:
+            return None
+        if _is_cache_path(ti.name):
+            skipped_cache += 1
+            return None
+        return ti
+
     try:
         with tarfile.open(backup_path, "w:gz") as tar:
             # 添加主数据目录
             tar.add(
                 data_dir_path,
                 arcname=data_dir_path.name,
-                filter=lambda x: None if "volumes_backup_tmp" in x.name else x,
+                filter=_tar_filter,
             )
 
             # 添加卷备份
@@ -117,6 +154,8 @@ def backup(
         success(
             f"备份完成: {backup_path} ({backup_path.stat().st_size / 1024 / 1024:.1f} MB)"
         )
+        if skipped_cache:
+            info(f"已跳过 {skipped_cache} 个缓存/临时文件。")
     except Exception as e:
         error(f"备份失败: {e}")
         # 即使备份失败也要尝试重启
@@ -128,8 +167,6 @@ def backup(
         raise click.Abort()
     finally:
         # 清理临时卷备份目录
-        import shutil
-
         if volumes_dir.exists():
             shutil.rmtree(volumes_dir)
 
