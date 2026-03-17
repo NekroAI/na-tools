@@ -5,9 +5,8 @@ from pathlib import Path
 import click
 
 from ..core.compose import compose_exists
-from ..core.config import load_env
 from ..core.docker import DockerEnv
-from ..core.platform import default_data_dir
+from ..core.platform import default_data_dir, resolve_mirror
 from ..utils.privilege import with_sudo_fallback
 from ..utils.console import confirm, error, info, success, warning
 
@@ -75,8 +74,7 @@ def update(
     # 更新沙盒镜像
     if update_sandbox:
         info("正在更新沙盒镜像...")
-        env_dict = load_env(env_path)
-        mirror = env_dict.get("MIRROR_REGISTRY", "")
+        mirror = resolve_mirror(env_path)
         if not docker.docker_pull("kromiose/nekro-agent-sandbox", mirror=mirror):
             warning("沙盒镜像更新失败，可稍后手动更新。")
 

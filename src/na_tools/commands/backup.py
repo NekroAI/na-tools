@@ -8,7 +8,7 @@ import click
 
 from ..core.compose import compose_exists, resolve_service_volumes
 from ..core.docker import DockerEnv
-from ..core.platform import default_data_dir, get_global_config_dir
+from ..core.platform import default_data_dir, get_global_config_dir, resolve_mirror
 from ..utils.privilege import with_sudo_fallback
 from ..utils.console import console, error, info, success, warning
 
@@ -78,13 +78,15 @@ def backup(
     # 执行卷备份
     volume_backups: list[Path] = []
     if volume_backups_map:
+        mirror = resolve_mirror(env_path if env_path.exists() else None)
+        alpine_image = f"{mirror}/alpine:latest" if mirror else "alpine:latest"
         volumes_dir.mkdir(exist_ok=True)
         for vol_name, filename, backup_file in volume_backups_map:
             info(f"正在备份存储卷 {vol_name}...")
 
             # 使用 alpine 打包
             success_backup = docker.run_ephemeral(
-                image="alpine:latest",
+                image=alpine_image,
                 cmd=["tar", "czf", f"/backup/{filename}", "-C", "/data", "."],
                 volumes={vol_name: "/data", str(volumes_dir): "/backup"},
             )
