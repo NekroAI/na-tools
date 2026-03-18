@@ -34,6 +34,44 @@ def _is_cache_path(arcname: str) -> bool:
     return any(fnmatch(rel, pat) or fnmatch(rel, pat + "/*") for pat in _CACHE_PATTERNS)
 
 
+def parse_backup_name(filename: str) -> str | None:
+    """从备份文件名中解析自定义名称。
+
+    文件名格式：
+      - 无名称: {dir}_backup_{YYYYMMDD}_{HHMMSS}.tar.gz
+      - 有名称: {dir}_backup_{name}_{YYYYMMDD}_{HHMMSS}.tar.gz
+
+    通过检查倒数第二、三段是否为时间戳来判断。
+    """
+    stem = filename
+    for suffix in (".tar.gz", ".tar", ".gz"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+
+    parts = stem.split("_")
+    # 至少需要: dir, backup, YYYYMMDD, HHMMSS → 4 段
+    if len(parts) < 4:
+        return None
+
+    # 检查最后两段是否为时间戳（纯数字，长度 8 和 6）
+    if not (parts[-2].isdigit() and len(parts[-2]) == 8 and parts[-1].isdigit() and len(parts[-1]) == 6):
+        return None
+
+    # 找到 "backup" 关键字的位置
+    try:
+        backup_idx = parts.index("backup")
+    except ValueError:
+        return None
+
+    # backup 和时间戳之间的部分就是 name
+    name_parts = parts[backup_idx + 1 : -2]
+    if not name_parts:
+        return None
+
+    return "_".join(name_parts)
+
+
 @click.group(invoke_without_command=True)
 @click.pass_context
 @with_sudo_fallback
@@ -42,8 +80,10 @@ def _is_cache_path(arcname: str) -> bool:
     "--output", "-o", type=click.Path(), default=None, help="备份文件输出路径"
 )
 @click.option("--no-restart", is_flag=True, default=False, help="备份后不重启服务")
+@click.option("--name", default=None, help="备份名称标识（例如 pre-preview）")
 def backup(
-    ctx: click.Context, data_dir: str | None, output: str | None, no_restart: bool
+    ctx: click.Context, data_dir: str | None, output: str | None, no_restart: bool,
+    name: str | None,
 ) -> None:
     """备份 Nekro Agent 数据和配置。"""
     _ = ctx.ensure_object(dict)
@@ -68,7 +108,8 @@ def backup(
     else:
         backup_dir = get_global_config_dir() / "backup" / data_dir_path.name
         backup_dir.mkdir(parents=True, exist_ok=True)
-        backup_path = backup_dir / f"{data_dir_path.name}_backup_{timestamp}.tar.gz"
+        name_part = f"{name}_" if name else ""
+        backup_path = backup_dir / f"{data_dir_path.name}_backup_{name_part}{timestamp}.tar.gz"
 
     backup_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -209,6 +250,8 @@ def list_backups(ctx: click.Context) -> None:
     info("发现以下历史备份：")
     for i, b in enumerate(backups, 1):
         mtime = datetime.fromtimestamp(b.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        bk_name = parse_backup_name(b.name)
+        name_str = f", 名称: {bk_name}" if bk_name else ""
         console.print(
-            f"  [{i}] {b.name} (备份时间: {mtime}, 大小: {b.stat().st_size / 1024 / 1024:.1f} MB)"
+            f"  [{i}] {b.name} (备份时间: {mtime}{name_str}, 大小: {b.stat().st_size / 1024 / 1024:.1f} MB)"
         )

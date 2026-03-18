@@ -10,6 +10,7 @@ from ..core.docker import DockerEnv
 from ..core.platform import default_data_dir, get_global_config_dir, resolve_mirror
 from ..utils.privilege import with_sudo_fallback
 from ..utils.console import confirm, console, error, info, success, warning
+from .backup import parse_backup_name
 
 
 @click.command()
@@ -49,8 +50,10 @@ def restore(backup_file: str | None, data_dir: str | None) -> None:
             mtime = datetime.fromtimestamp(b.stat().st_mtime).strftime(
                 "%Y-%m-%d %H:%M:%S"
             )
+            bk_name = parse_backup_name(b.name)
+            name_str = f", 名称: {bk_name}" if bk_name else ""
             console.print(
-                f"  [{i}] {b.name} (备份时间: {mtime}, 大小: {b.stat().st_size / 1024 / 1024:.1f} MB)"
+                f"  [{i}] {b.name} (备份时间: {mtime}{name_str}, 大小: {b.stat().st_size / 1024 / 1024:.1f} MB)"
             )
 
         import typing

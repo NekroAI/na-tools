@@ -8,6 +8,7 @@ from ..core.compose import (
     apply_mirror_to_compose,
     download_compose,
     patch_compose_isolation,
+    set_image_tag,
 )
 
 from ..core.config import load_env, setup_env
@@ -25,11 +26,19 @@ from ..utils.console import confirm, error, info, print_panel, prompt, warning
 @click.option(
     "--non-interactive", is_flag=True, default=False, help="非交互模式，使用默认值"
 )
+@click.option("--preview", is_flag=True, default=False, help="使用 preview 频道镜像")
+@click.option(
+    "--with-cc-sandbox/--without-cc-sandbox",
+    default=None,
+    help="是否拉取 CC 沙盒镜像",
+)
 def install(
     data_dir: str | None,
     with_napcat: bool | None,
     port: int | None,
     non_interactive: bool,
+    preview: bool,
+    with_cc_sandbox: bool | None,
 ) -> None:
     """安装 Nekro Agent 服务。"""
     interactive = not non_interactive
@@ -85,6 +94,12 @@ def install(
         info(f"应用镜像站配置: {mirror}")
         apply_mirror_to_compose(data_dir_path, mirror)
 
+    # 6.5 如果使用 preview 频道，修改镜像 tag
+    if preview:
+        info("使用 preview 频道镜像...")
+        if not set_image_tag(data_dir_path, "kromiose/nekro-agent", "preview"):
+            warning("无法修改镜像 tag，将使用默认 latest 版本。")
+
     # 7. 拉取服务镜像
     info("正在拉取服务镜像...")
     if not docker.pull(cwd=data_dir_path, env_file=env_path):
@@ -104,6 +119,16 @@ def install(
             "沙盒镜像拉取失败，可稍后手动拉取: docker pull kromiose/nekro-agent-sandbox"
         )
 
+    # 9.5 CC 沙盒镜像
+    if with_cc_sandbox is None and interactive:
+        with_cc_sandbox = confirm("是否拉取 CC 沙盒镜像 (nekro-cc-sandbox)?", default=False)
+    if with_cc_sandbox:
+        info("正在拉取 CC 沙盒镜像...")
+        if not docker.docker_pull("kromiose/nekro-cc-sandbox", mirror=mirror):
+            warning(
+                "CC 沙盒镜像拉取失败，可稍后手动拉取: docker pull kromiose/nekro-cc-sandbox"
+            )
+
     # 10. 保存到全局配置
     set_default_data_dir(data_dir_path)
 
@@ -113,8 +138,10 @@ def install(
     admin_password = env.get("NEKRO_ADMIN_PASSWORD", "")
     onebot_token = env.get("ONEBOT_ACCESS_TOKEN", "")
 
+    channel = "preview" if preview else "stable"
     result_lines = [
         f"数据目录: {data_dir_path}",
+        f"频道: {channel}",
         f"服务端口: {expose_port}",
         f"Web 访问: http://127.0.0.1:{expose_port}",
         "",

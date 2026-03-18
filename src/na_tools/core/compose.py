@@ -174,6 +174,62 @@ def patch_compose_isolation(data_dir: Path) -> None:
     success(f"已设置 INSTANCE_NAME={prefix}，容器将使用前缀隔离")
 
 
+def set_image_tag(data_dir: Path, image_prefix: str, tag: str) -> bool:
+    """修改 compose 中匹配 image_prefix 的服务镜像 tag。
+
+    处理镜像站前缀：mirror/kromiose/nekro-agent:latest → mirror/kromiose/nekro-agent:preview
+
+    Args:
+        data_dir: 数据目录。
+        image_prefix: 镜像前缀，如 "kromiose/nekro-agent"。
+        tag: 目标 tag，如 "preview" 或 "latest"。
+
+    Returns:
+        是否成功修改。
+    """
+    import yaml
+
+    compose_path = data_dir / COMPOSE_FILE
+    if not compose_path.exists():
+        return False
+
+    with open(compose_path, encoding="utf-8") as f:
+        content = yaml.safe_load(f)
+
+    if not isinstance(content, dict) or "services" not in content:
+        return False
+
+    data = cast(dict[str, object], content)
+    services_data = data["services"]
+    if not isinstance(services_data, dict):
+        return False
+
+    services = cast(dict[str, dict[str, object]], services_data)
+    modified = False
+
+    for service_config in services.values():
+        image = service_config.get("image")
+        if not isinstance(image, str):
+            continue
+        # 匹配：image_prefix 可能带镜像站前缀
+        # 例如 "docker.1ms.run/kromiose/nekro-agent:latest" 包含 "kromiose/nekro-agent"
+        if image_prefix not in image:
+            continue
+        # 替换 tag：取 : 前的部分，拼接新 tag
+        base = image.rsplit(":", 1)[0]
+        new_image = f"{base}:{tag}"
+        if new_image != image:
+            service_config["image"] = new_image
+            info(f"  镜像 tag 变更: {image} -> {new_image}")
+            modified = True
+
+    if modified:
+        with open(compose_path, "w", encoding="utf-8") as f:
+            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+
+    return modified
+
+
 def resolve_service_volumes(
     docker: DockerEnv,
     data_dir: Path,
