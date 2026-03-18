@@ -111,15 +111,18 @@ def install(
     if not docker.up(cwd=data_dir_path, env_file=env_path):
         error("服务启动失败。")
         raise click.Abort()
+    
+    # 9. 保存到全局配置
+    set_default_data_dir(data_dir_path)
 
-    # 9. 拉取沙盒镜像
+    # 10. 拉取沙盒镜像
     info("正在拉取沙盒镜像...")
     if not docker.docker_pull("kromiose/nekro-agent-sandbox", mirror=mirror):
         warning(
             "沙盒镜像拉取失败，可稍后手动拉取: docker pull kromiose/nekro-agent-sandbox"
         )
 
-    # 9.5 CC 沙盒镜像
+    # 10.5 CC 沙盒镜像
     if with_cc_sandbox is None and interactive:
         with_cc_sandbox = confirm("是否拉取 CC 沙盒镜像 (nekro-cc-sandbox)?", default=False)
     if with_cc_sandbox:
@@ -128,9 +131,6 @@ def install(
             warning(
                 "CC 沙盒镜像拉取失败，可稍后手动拉取: docker pull kromiose/nekro-cc-sandbox"
             )
-
-    # 10. 保存到全局配置
-    set_default_data_dir(data_dir_path)
 
     # 11. 显示部署结果
     env = load_env(env_path)
