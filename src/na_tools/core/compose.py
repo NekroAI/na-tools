@@ -205,6 +205,7 @@ def set_image_tag(data_dir: Path, image_prefix: str, tag: str) -> bool:
         return False
 
     services = cast(dict[str, dict[str, object]], services_data)
+    matched = False
     modified = False
 
     for service_config in services.values():
@@ -215,6 +216,7 @@ def set_image_tag(data_dir: Path, image_prefix: str, tag: str) -> bool:
         # 例如 "docker.1ms.run/kromiose/nekro-agent:latest" 包含 "kromiose/nekro-agent"
         if image_prefix not in image:
             continue
+        matched = True
         # 替换 tag：取 : 前的部分，拼接新 tag
         base = image.rsplit(":", 1)[0]
         new_image = f"{base}:{tag}"
@@ -227,7 +229,7 @@ def set_image_tag(data_dir: Path, image_prefix: str, tag: str) -> bool:
         with open(compose_path, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 
-    return modified
+    return matched
 
 
 def resolve_service_volumes(

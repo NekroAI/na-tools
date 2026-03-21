@@ -43,7 +43,7 @@ uv sync
 | `na-tools backup` | 备份数据和配置 |
 | `na-tools backup list` | 列出所有历史备份 |
 | `na-tools restore [file]` | 从备份恢复（不指定文件则从列表选择） |
-| `na-tools config` | 快捷配置 nekro-agent.yaml |
+| `na-tools config` | 配置镜像源 |
 
 ### 日志与工具
 
@@ -61,11 +61,8 @@ na-tools install
 # 绑定已安装的 NA 实例（适用于从其他方式安装的或迁移的 NA）
 na-tools bind --data-dir /path/to/nekro_data
 
-# 配置模型 API
-na-tools config model
-
 # 添加管理员
-na-tools config admin --add 12345678
+na-tools config "docker.1ms.run"
 
 # 更新到最新版
 na-tools update
