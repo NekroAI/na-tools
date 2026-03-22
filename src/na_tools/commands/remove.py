@@ -148,9 +148,9 @@ def remove(data_dir: str | None, keep_data: bool, force: bool) -> None:
             success(f"数据目录已删除: {data_dir_path}")
         except Exception as e:
             warning(f"数据目录删除失败: {e}")
-            info("您可能需要手动删除: {data_dir_path}")
+            info(f"您可能需要手动删除: {data_dir_path}")
     else:
-        info("\n数据目录已保留: {data_dir_path}")
+        info(f"数据目录已保留: {data_dir_path}")
 
     # 11. 显示结果
     result_lines = [

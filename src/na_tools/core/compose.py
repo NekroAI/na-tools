@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, cast
 from pathlib import Path
 
@@ -15,10 +16,17 @@ if TYPE_CHECKING:
 COMPOSE_FILE = "docker-compose.yml"
 COMPOSE_NAPCAT_FILE = "docker-compose-x-napcat.yml"
 
+# 服务名常量
+SERVICE_AGENT = "nekro_agent"
+SERVICE_POSTGRES = "nekro_postgres"
+SERVICE_QDRANT = "nekro_qdrant"
+SERVICE_NAPCAT = "nekro_napcat"
+ALL_SERVICES = {SERVICE_AGENT, SERVICE_POSTGRES, SERVICE_QDRANT, SERVICE_NAPCAT}
+
 # 需要备份/恢复的服务卷映射: 服务名 -> (容器内挂载路径, 备份文件名)
 VOLUME_BACKUP_TARGETS: dict[str, tuple[str, str]] = {
-    "nekro_postgres": ("/var/lib/postgresql/data", "postgres.tar.gz"),
-    "nekro_qdrant": ("/qdrant/storage", "qdrant.tar.gz"),
+    SERVICE_POSTGRES: ("/var/lib/postgresql/data", "postgres.tar.gz"),
+    SERVICE_QDRANT: ("/qdrant/storage", "qdrant.tar.gz"),
 }
 
 
@@ -106,8 +114,18 @@ def apply_mirror_to_compose(data_dir: Path, mirror: str) -> None:
                 info(f"  服务 {service_name}: {image} -> {new_image}")
 
     if modified:
-        with open(compose_path, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+        import tempfile
+
+        tmp_fd, tmp_path = tempfile.mkstemp(
+            dir=compose_path.parent, suffix=".tmp"
+        )
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+                yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+            os.replace(tmp_path, compose_path)
+        except Exception:
+            os.unlink(tmp_path)
+            raise
         success(f"已更新 docker-compose.yml 使用镜像站: {mirror}")
 
 
@@ -148,7 +166,7 @@ def patch_compose_isolation(data_dir: Path) -> None:
     except Exception:
         return
 
-    default_names = {"nekro_agent", "nekro_postgres", "nekro_qdrant", "nekro_napcat"}
+    default_names = ALL_SERVICES
     conflicts = default_names & existing_names
 
     if not conflicts:

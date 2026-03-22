@@ -27,7 +27,7 @@ def _detect_compose_cmd() -> list[str] | None:
         try:
             _ = run_cmd([docker, "compose", "version"], capture=True, check=True)
             return [docker, "compose"]
-        except Exception:
+        except (subprocess.CalledProcessError, OSError):
             pass
 
     dc = shutil.which("docker-compose")
@@ -58,7 +58,7 @@ class DockerEnv:
             try:
                 result = run_cmd([self.docker_path, "--version"], capture=True)
                 success(f"Docker 已安装: {result.stdout.strip()}")
-            except Exception:
+            except (subprocess.CalledProcessError, OSError):
                 success("Docker 已安装")
         else:
             error("Docker 未安装")
@@ -68,7 +68,7 @@ class DockerEnv:
             try:
                 result = run_cmd([*self.compose_cmd, "version"], capture=True)
                 success(f"Docker Compose 已安装: {result.stdout.strip()}")
-            except Exception:
+            except (subprocess.CalledProcessError, OSError):
                 success("Docker Compose 已安装")
         else:
             error("Docker Compose 未安装")
@@ -94,7 +94,7 @@ class DockerEnv:
                         info(
                             "Docker Desktop 已安装，请从 应用程序 中启动后重新运行此工具。"
                         )
-                    except Exception as e:
+                    except (subprocess.CalledProcessError, OSError) as e:
                         error(f"安装失败: {e}")
             return False
 
@@ -165,7 +165,7 @@ class DockerEnv:
             _ = run_cmd(["sudo"] + cmd, check=True)
             success("Docker 安装成功!")
             return True
-        except Exception as e:
+        except (subprocess.CalledProcessError, OSError) as e:
             error(f"Docker 安装失败: {e}")
             return False
         finally:
@@ -208,7 +208,7 @@ class DockerEnv:
         try:
             _ = self.compose("pull", cwd=cwd, env_file=env_file)
             return True
-        except Exception as e:
+        except (subprocess.CalledProcessError, OSError) as e:
             if is_permission_error(e):
                 raise
             error(f"镜像拉取失败: {e}")
@@ -218,7 +218,7 @@ class DockerEnv:
         try:
             _ = self.compose("up", "-d", cwd=cwd, env_file=env_file)
             return True
-        except Exception as e:
+        except (subprocess.CalledProcessError, OSError) as e:
             if is_permission_error(e):
                 raise
             error(f"服务启动失败: {e}")
@@ -228,7 +228,7 @@ class DockerEnv:
         try:
             _ = self.compose("down", cwd=cwd, env_file=env_file)
             return True
-        except Exception as e:
+        except (subprocess.CalledProcessError, OSError) as e:
             if is_permission_error(e):
                 raise
             error(f"服务停止失败: {e}")
@@ -238,7 +238,7 @@ class DockerEnv:
         try:
             result = self.compose("ps", cwd=cwd, env_file=env_file, capture=True)
             return result.stdout
-        except Exception as e:
+        except (subprocess.CalledProcessError, OSError) as e:
             if is_permission_error(e):
                 raise
             return ""
@@ -249,7 +249,7 @@ class DockerEnv:
         try:
             _ = self.compose("restart", service, cwd=cwd, env_file=env_file)
             return True
-        except Exception as e:
+        except (subprocess.CalledProcessError, OSError) as e:
             if is_permission_error(e):
                 raise
             error(f"服务重启失败: {e}")
@@ -272,10 +272,10 @@ class DockerEnv:
             if mirror:
                 try:
                     _ = run_cmd([docker_path, "tag", target_image, image])
-                except Exception:
+                except (subprocess.CalledProcessError, OSError):
                     pass
             return True
-        except Exception as e:
+        except (subprocess.CalledProcessError, OSError) as e:
             if is_permission_error(e):
                 raise
             error(f"镜像拉取失败 {target_image}: {e}")
@@ -306,7 +306,7 @@ class DockerEnv:
                 "config", "--format", "json", cwd=cwd, env_file=env_file, capture=True
             )
             return json.loads(result.stdout)  # pyright: ignore[reportAny]
-        except Exception as e:
+        except (subprocess.CalledProcessError, OSError) as e:
             if is_permission_error(e):
                 raise
             error(f"获取 compose 配置失败: {e}")
@@ -344,7 +344,7 @@ class DockerEnv:
         try:
             _ = run_cmd(docker_cmd, check=True)
             return True
-        except Exception as e:
+        except (subprocess.CalledProcessError, OSError) as e:
             if is_permission_error(e):
                 raise
             error(f"容器运行失败: {e}")
@@ -386,7 +386,7 @@ class DockerEnv:
             for m in mounts:
                 if m.get("Destination") == target and m.get("Type") == "volume":
                     return m.get("Name")
-        except Exception as e:
+        except (subprocess.CalledProcessError, OSError, json.JSONDecodeError) as e:
             if is_permission_error(e):
                 raise
             return None

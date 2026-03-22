@@ -4,7 +4,7 @@ from pathlib import Path
 
 import click
 
-from ..core.compose import compose_exists
+from ..core.compose import SERVICE_AGENT, compose_exists
 from ..core.config import get_service_name
 from ..core.docker import DockerEnv
 from ..core.platform import default_data_dir
@@ -14,7 +14,7 @@ from ..utils.console import error
 
 @click.command()
 @with_sudo_fallback
-@click.argument("service", default="nekro_agent")
+@click.argument("service", default=SERVICE_AGENT)
 @click.option("--data-dir", type=click.Path(), default=None, help="数据目录路径")
 @click.option("--follow", "-f", is_flag=True, default=False, help="持续跟踪日志")
 @click.option("--tail", "-n", type=int, default=100, help="显示最后 N 行")

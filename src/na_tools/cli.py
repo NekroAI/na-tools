@@ -37,7 +37,15 @@ class RichGroup(click.Group):
         sio = StringIO()
         console = Console(file=sio, force_terminal=True)
 
-        # 标题面板
+        self._render_title(console)
+        cmd_map = self._collect_commands(ctx)
+        self._render_groups(console, cmd_map, ctx)
+        self._render_options(console)
+
+        formatter.write(sio.getvalue())
+
+    def _render_title(self, console: Console) -> None:
+        """渲染标题面板。"""
         title = Text()
         title.append("◆ ", style="bold cyan")
         title.append("NA-Tools", style="bold white")
@@ -47,15 +55,22 @@ class RichGroup(click.Group):
         console.print()
         console.print(Panel(title, border_style="cyan", padding=(1, 2)))
 
-        # 收集所有命令
-        commands = self.list_commands(ctx)
+    def _collect_commands(self, ctx: click.Context) -> dict[str, click.Command]:
+        """收集所有已注册命令。"""
         cmd_map: dict[str, click.Command] = {}
-        for name in commands:
+        for name in self.list_commands(ctx):
             cmd = self.get_command(ctx, name)
             if cmd is not None:
                 cmd_map[name] = cmd
+        return cmd_map
 
-        # 按分组渲染
+    def _render_groups(
+        self,
+        console: Console,
+        cmd_map: dict[str, click.Command],
+        ctx: click.Context,
+    ) -> None:
+        """按分组渲染命令列表，包括未分组的兜底。"""
         categorized: set[str] = set()
         for group_name, cmd_names in COMMAND_GROUPS:
             group_cmds = [(n, cmd_map[n]) for n in cmd_names if n in cmd_map]
@@ -68,9 +83,11 @@ class RichGroup(click.Group):
                 categorized.add(name)
             console.print()
 
-        # 未分组的命令（兜底）
+        # 未分组的命令
         uncategorized = [
-            (n, cmd_map[n]) for n in commands if n not in categorized and n in cmd_map
+            (n, cmd_map[n])
+            for n in self.list_commands(ctx)
+            if n not in categorized and n in cmd_map
         ]
         if uncategorized:
             console.print("  [bold cyan]其他[/]")
@@ -79,19 +96,17 @@ class RichGroup(click.Group):
                 console.print(f"    [green]{name:<12}[/] {help_text}")
             console.print()
 
-        # 全局选项
+    @staticmethod
+    def _render_options(console: Console) -> None:
+        """渲染全局选项和尾部提示。"""
         console.print("  [bold cyan]选项[/]")
         console.print("    [green]--version     [/] 显示版本号")
         console.print("    [green]--help        [/] 显示帮助信息")
         console.print()
-
-        # 尾部提示
         console.print(
             "  [dim]使用[/] [bold]na-tools <命令> --help[/] [dim]查看具体命令的帮助信息[/]"
         )
         console.print()
-
-        formatter.write(sio.getvalue())
 
 
 @click.group(cls=RichGroup)

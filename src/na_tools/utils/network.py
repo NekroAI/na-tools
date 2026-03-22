@@ -32,9 +32,11 @@ def download_file(filename: str, output: Path) -> bool:
         try:
             info(f"正在下载 {filename} ...")
             with httpx.Client(timeout=TIMEOUT, follow_redirects=True) as client:
-                resp = client.get(url)
-                _ = resp.raise_for_status()
-            _ = output.write_bytes(resp.content)
+                with client.stream("GET", url) as resp:
+                    resp.raise_for_status()
+                    with open(output, "wb") as f:
+                        for chunk in resp.iter_bytes():
+                            f.write(chunk)
             return True
         except httpx.HTTPError:
             info(f"从 {base_url} 下载失败，尝试其他源...")

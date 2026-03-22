@@ -106,7 +106,12 @@ def restore(backup_file: str | None, data_dir: str | None) -> None:
             import shutil
 
             with tempfile.TemporaryDirectory() as tmp_dir:
-                tar.extractall(tmp_dir, filter="data")
+                import sys
+
+                if sys.version_info >= (3, 12):
+                    tar.extractall(tmp_dir, filter="data")
+                else:
+                    tar.extractall(tmp_dir)
                 extracted_dir = Path(tmp_dir) / top_dir
 
                 # 检查是否存在 volumes 备份

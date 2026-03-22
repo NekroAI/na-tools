@@ -5,6 +5,7 @@ from pathlib import Path
 
 import click
 
+from ..core.compose import SERVICE_AGENT
 from ..core.config import get_container_name, get_service_name, load_env
 from ..core.docker import DockerEnv
 from ..core.platform import default_data_dir
@@ -87,12 +88,15 @@ def napcat(data_dir: str | None, qq: str | None) -> None:
         qq = prompt("请输入已登录的 QQ 号")
 
     qq = qq.strip()
+    if not qq:
+        error("QQ 号不能为空。")
+        raise click.Abort()
     if not qq.isdigit():
         error("QQ 号只能包含数字。")
         raise click.Abort()
 
     # 3. 构建并写入配置（容器名与 compose 模板 ${INSTANCE_NAME:-}nekro_agent 一致）
-    na_hostname = get_container_name("nekro_agent", env)
+    na_hostname = get_container_name(SERVICE_AGENT, env)
     ws_url = f"ws://{na_hostname}:8021/onebot/v11/ws"
     config = _build_onebot_config(ws_url, token)
 
