@@ -40,6 +40,7 @@ jobs:
         with:
           generate_release_notes: true
           files: |
-            dist/*
+            dist/*.tar.gz
+            dist/*.whl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

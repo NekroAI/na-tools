@@ -61,7 +61,7 @@ na-tools install
 # 绑定已安装的 NA 实例（适用于从其他方式安装的或迁移的 NA）
 na-tools bind --data-dir /path/to/nekro_data
 
-# 添加管理员
+# 配置镜像源
 na-tools config "docker.1ms.run"
 
 # 更新到最新版
