@@ -73,20 +73,48 @@ def get_container_name(service: str, env: dict[str, str]) -> str:
     return f"{prefix}{service}"
 
 
+# 服务名别名映射（延迟初始化）
+_SVC_ALIASES: dict[str, str] | None = None
+
+
+def _init_service_aliases() -> dict[str, str]:
+    """从 compose.py 动态初始化服务名别名映射。
+
+    使用 compose.py 中定义的正式服务名常量自动生成短名 -> 全名映射，
+    确保别名与官方服务名保持同步，避免硬编码字符串。
+
+    Returns:
+        别名映射字典 {短名: 全名}
+    """
+    # 延迟导入避免循环依赖
+    from .compose import SERVICE_AGENT, SERVICE_POSTGRES, SERVICE_QDRANT, SERVICE_NAPCAT
+
+    return {
+        "agent": SERVICE_AGENT,
+        "postgres": SERVICE_POSTGRES,
+        "qdrant": SERVICE_QDRANT,
+        "napcat": SERVICE_NAPCAT,
+    }
+
+
 def get_service_name(service: str) -> str:
     """返回 compose 文件中的 service 名（YAML key）。
 
     ``docker compose restart/logs`` 等命令接受的是 compose 文件里的 service 名，
     即 YAML key（如 ``nekro_agent``），而非带前缀的容器名。
-    INSTANCE_NAME 前缀只影响容器名，不影响 service 名，因此直接返回原始 service。
+    INSTANCE_NAME 前缀只影响容器名，不影响 service 名。
+    支持短名别名映射（如 ``napcat`` -> ``nekro_napcat``）。
 
     Args:
-        service: 基础服务名，如 ``nekro_agent``。
+        service: 基础服务名，如 ``nekro_agent`` 或别名 ``napcat``。
 
     Returns:
-        compose service 名，与 ``service`` 参数相同。
+        compose service 名，已映射到正确的全名。
     """
-    return service
+    global _SVC_ALIASES
+    if _SVC_ALIASES is None:
+        _SVC_ALIASES = _init_service_aliases()
+    return _SVC_ALIASES.get(service, service)
 
 
 def download_env_example(data_dir: Path) -> bool:
