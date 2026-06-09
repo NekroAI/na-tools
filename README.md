@@ -139,6 +139,12 @@ na-tools backup --name before-migration
 
 ```bash
 na-tools backup list
+
+# 只查看指定名称的备份
+na-tools backup list --name pre-preview
+
+# 只查看最近 5 个备份
+na-tools backup list --limit 5
 ```
 
 输出示例：

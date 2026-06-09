@@ -225,8 +225,19 @@ def backup(
 
 
 @backup.command("list")
+@click.option("--name", "filter_name", default=None, help="只显示指定名称的备份")
+@click.option(
+    "--limit",
+    type=click.IntRange(min=1),
+    default=None,
+    help="最多显示的备份数量",
+)
 @click.pass_context
-def list_backups(ctx: click.Context) -> None:
+def list_backups(
+    ctx: click.Context,
+    filter_name: str | None,
+    limit: int | None,
+) -> None:
     """列出可用的备份文件。"""
     obj = ctx.ensure_object(dict)
     data_dir: str | None = obj.get("data_dir")
@@ -243,11 +254,27 @@ def list_backups(ctx: click.Context) -> None:
         reverse=True,
     )
 
+    if filter_name:
+        backups = [b for b in backups if parse_backup_name(b.name) == filter_name]
+
+    if limit is not None:
+        backups = backups[:limit]
+
     if not backups:
+        if filter_name:
+            info(f"没有找到名称为 {filter_name} 的历史备份。")
+            return
         info("没有任何历史备份。")
         return
 
-    info("发现以下历史备份：")
+    filters: list[str] = []
+    if filter_name:
+        filters.append(f"名称: {filter_name}")
+    if limit is not None:
+        filters.append(f"最多 {limit} 个")
+    filter_text = f"（{', '.join(filters)}）" if filters else ""
+
+    info(f"发现以下历史备份{filter_text}：")
     for i, b in enumerate(backups, 1):
         mtime = datetime.fromtimestamp(b.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
         bk_name = parse_backup_name(b.name)

@@ -35,6 +35,18 @@ jobs:
         with:
           password: ${{ secrets.PYPI_TOKEN }}
 
+      - name: Build Linux executable
+        run: |
+          uv run --with pyinstaller pyinstaller \
+            --clean \
+            --noconfirm \
+            --onefile \
+            --name na-tools-linux-x86_64 \
+            --paths src \
+            src/na_tools/__main__.py
+          chmod +x dist/na-tools-linux-x86_64
+          dist/na-tools-linux-x86_64 --version
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -42,5 +54,6 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.whl
+            dist/na-tools-linux-x86_64
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
