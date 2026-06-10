@@ -4,9 +4,16 @@ from pathlib import Path
 
 import click
 
-from ..core.compose import compose_exists, set_image_tag
-from ..core.docker import DockerEnv
-from ..core.platform import default_data_dir, get_global_config_dir, resolve_mirror
+from ..core.platform import default_data_dir
+from ..services.job_events import UpdateEvent
+from ..services.update_service import (
+    BackupRequest,
+    RestoreRequest,
+    UpdateRequest,
+    UpdateService,
+    UpdateServiceError,
+    find_latest_named_backup,
+)
 from ..utils.privilege import with_sudo_fallback
 from ..utils.console import confirm, error, info, success, warning
 
@@ -49,175 +56,114 @@ def update(
 
     data_dir_path = Path(data_dir or default_data_dir()).expanduser().resolve()
 
-    # 验证现有安装
-    if not compose_exists(data_dir_path):
-        error(f"未找到已有安装。数据目录: {data_dir_path}")
-        info("请先运行 `na-tools install` 安装。")
-        raise click.Abort()
-
-    env_path = data_dir_path / ".env"
-    if not env_path.exists():
-        error(f"未找到 .env 文件: {env_path}")
-        raise click.Abort()
-
-    docker = DockerEnv()
-    if not docker.docker_installed or not docker.compose_installed:
-        error("Docker 环境不可用。")
-        raise click.Abort()
-
-    # --- preview 模式 ---
     if preview:
-        _do_preview(ctx, data_dir, data_dir_path, env_path, docker, update_sandbox, update_cc_sandbox)
-        return
+        warning("即将切换到 preview 频道，这是预览版本，可能不稳定。")
+        if not confirm("是否继续？", default=False):
+            raise click.Abort()
+        channel = "preview"
+        should_backup = True
+        restore_pre_preview = False
 
-    # --- rollback 模式 ---
-    if rollback:
-        _do_rollback(ctx, data_dir_path, env_path, docker)
-        return
+    elif rollback:
+        info("正在从 preview 回退到稳定版...")
+        pre_preview_backup = find_latest_named_backup(data_dir_path, "pre-preview")
+        restore_pre_preview = False
+        if pre_preview_backup:
+            info(f"找到切换前备份: {pre_preview_backup.name}")
+            restore_pre_preview = confirm(
+                "是否从 pre-preview 备份还原数据？", default=True
+            )
+        channel = "rollback"
+        should_backup = False
 
-    # --- 普通更新流程 ---
-    # 备份确认
-    if should_backup is None:
-        should_backup = confirm("是否在更新前备份数据？", default=True)
+    else:
+        channel = "stable"
+        restore_pre_preview = False
+        if should_backup is None:
+            should_backup = confirm("是否在更新前备份数据？", default=True)
 
-    if should_backup:
+    request = UpdateRequest(
+        data_dir=data_dir_path,
+        channel=channel,
+        backup=bool(should_backup),
+        update_sandbox=update_sandbox,
+        update_cc_sandbox=update_cc_sandbox,
+        restore_pre_preview=restore_pre_preview,
+    )
+    service = UpdateService(
+        backup_runner=_make_backup_runner(ctx),
+        restore_runner=_make_restore_runner(ctx),
+        restore_runner_restarts_service=True,
+    )
+
+    try:
+        _ = service.run(request, _console_event_sink)
+    except UpdateServiceError as exc:
+        error(exc.message)
+        if exc.code == "compose_missing":
+            info("请先运行 `na-tools install` 安装。")
+        raise click.Abort() from exc
+
+    if preview:
+        success("🎉 已切换到 preview 频道!")
+        info("如需回退到稳定版，请运行: na-tools update --rollback")
+    elif rollback:
+        success("🎉 已回退到稳定版!")
+    else:
+        success("🎉 更新完成!")
+
+
+def _console_event_sink(event: UpdateEvent) -> None:
+    """Render service events into the existing CLI console style."""
+    if event.type == "warning" and event.message:
+        warning(event.message)
+    elif event.type == "log" and event.message:
+        if event.level == "warning":
+            warning(event.message)
+        else:
+            info(event.message)
+
+
+def _make_backup_runner(ctx: click.Context):
+    def _backup_runner(request: BackupRequest) -> Path | None:
         from .backup import backup as backup_cmd
 
-        info("正在执行更新前备份...")
-        ctx.invoke(backup_cmd, data_dir=data_dir, no_restart=True)
-
-    # 拉取最新镜像
-    info("正在拉取最新镜像...")
-    if not docker.pull(cwd=data_dir_path, env_file=env_path):
-        error("镜像拉取失败。")
-        raise click.Abort()
-
-    # 重启服务
-    info("正在重启服务...")
-    if not docker.up(cwd=data_dir_path, env_file=env_path):
-        error("服务重启失败。")
-        raise click.Abort()
-
-    # 更新沙盒镜像
-    mirror = resolve_mirror(env_path)
-    if update_sandbox:
-        info("正在更新沙盒镜像...")
-        if not docker.docker_pull("kromiose/nekro-agent-sandbox", mirror=mirror):
-            warning("沙盒镜像更新失败，可稍后手动更新。")
-
-    if update_cc_sandbox:
-        info("正在更新 CC 沙盒镜像...")
-        if not docker.docker_pull("kromiose/nekro-cc-sandbox", mirror=mirror):
-            warning("CC 沙盒镜像更新失败，可稍后手动更新。")
-
-    success("🎉 更新完成!")
-
-
-def _do_preview(
-    ctx: click.Context,
-    data_dir: str | None,
-    data_dir_path: Path,
-    env_path: Path,
-    docker: DockerEnv,
-    update_sandbox: bool,
-    update_cc_sandbox: bool,
-) -> None:
-    """执行 preview 频道切换。"""
-    from .backup import backup as backup_cmd
-
-    warning("即将切换到 preview 频道，这是预览版本，可能不稳定。")
-    if not confirm("是否继续？", default=False):
-        raise click.Abort()
-
-    # 强制备份（名称 pre-preview）
-    info("正在执行切换前自动备份（名称: pre-preview）...")
-    ctx.invoke(backup_cmd, data_dir=data_dir, no_restart=True, name="pre-preview")
-
-    # 修改镜像 tag
-    info("正在切换到 preview 镜像...")
-    if not set_image_tag(data_dir_path, "kromiose/nekro-agent", "preview"):
-        error("无法修改镜像 tag，请检查 docker-compose.yml。")
-        raise click.Abort()
-
-    # 拉取并重启
-    info("正在拉取 preview 镜像...")
-    if not docker.pull(cwd=data_dir_path, env_file=env_path):
-        error("镜像拉取失败。")
-        raise click.Abort()
-
-    info("正在重启服务...")
-    if not docker.up(cwd=data_dir_path, env_file=env_path):
-        error("服务重启失败。")
-        raise click.Abort()
-
-    # 更新沙盒镜像
-    mirror = resolve_mirror(env_path)
-    if update_sandbox:
-        info("正在更新沙盒镜像...")
-        if not docker.docker_pull("kromiose/nekro-agent-sandbox", mirror=mirror):
-            warning("沙盒镜像更新失败，可稍后手动更新。")
-
-    if update_cc_sandbox:
-        info("正在更新 CC 沙盒镜像...")
-        if not docker.docker_pull("kromiose/nekro-cc-sandbox", mirror=mirror):
-            warning("CC 沙盒镜像更新失败，可稍后手动更新。")
-
-    success("🎉 已切换到 preview 频道!")
-    info("如需回退到稳定版，请运行: na-tools update --rollback")
-
-
-def _do_rollback(
-    ctx: click.Context,
-    data_dir_path: Path,
-    env_path: Path,
-    docker: DockerEnv,
-) -> None:
-    """从 preview 回退到稳定版。"""
-    from .backup import parse_backup_name
-
-    info("正在从 preview 回退到稳定版...")
-
-    # 切换镜像 tag 回 latest
-    info("正在切换回 latest 镜像...")
-    set_image_tag(data_dir_path, "kromiose/nekro-agent", "latest")
-
-    # 查找最近的 pre-preview 备份
-    backup_dir = get_global_config_dir() / "backup" / data_dir_path.name
-    pre_preview_backup: Path | None = None
-    if backup_dir.exists():
-        backups = sorted(
-            list(backup_dir.glob("*.tar.gz")),
-            key=lambda x: x.stat().st_mtime,
-            reverse=True,
+        ctx.invoke(
+            backup_cmd,
+            data_dir=str(request.data_dir),
+            no_restart=request.no_restart,
+            name=request.name,
         )
-        for b in backups:
-            if parse_backup_name(b.name) == "pre-preview":
-                pre_preview_backup = b
-                break
+        if request.name:
+            return find_latest_named_backup(request.data_dir, request.name)
+        return _find_latest_backup(request.data_dir)
 
-    if pre_preview_backup:
-        info(f"找到切换前备份: {pre_preview_backup.name}")
-        if confirm("是否从 pre-preview 备份还原数据？", default=True):
-            ctx.invoke(
-                _get_restore_cmd(),
-                backup_file=str(pre_preview_backup),
-                data_dir=str(data_dir_path),
-            )
-            success("🎉 已回退到稳定版!")
-            return
+    return _backup_runner
 
-    # 没有 pre-preview 备份或用户不还原，只 pull + up
-    info("正在拉取 latest 镜像...")
-    if not docker.pull(cwd=data_dir_path, env_file=env_path):
-        error("镜像拉取失败。")
-        raise click.Abort()
 
-    info("正在重启服务...")
-    if not docker.up(cwd=data_dir_path, env_file=env_path):
-        error("服务重启失败。")
-        raise click.Abort()
+def _make_restore_runner(ctx: click.Context):
+    def _restore_runner(request: RestoreRequest) -> None:
+        ctx.invoke(
+            _get_restore_cmd(),
+            backup_file=str(request.backup_file),
+            data_dir=str(request.data_dir),
+        )
 
-    success("🎉 已回退到稳定版!")
+    return _restore_runner
+
+
+def _find_latest_backup(data_dir: Path) -> Path | None:
+    from ..core.platform import get_global_config_dir
+
+    backup_dir = get_global_config_dir() / "backup" / data_dir.name
+    if not backup_dir.exists():
+        return None
+    backups = sorted(
+        backup_dir.glob("*.tar.gz"),
+        key=lambda backup_file: backup_file.stat().st_mtime,
+        reverse=True,
+    )
+    return backups[0] if backups else None
 
 
 def _get_restore_cmd() -> click.Command:
