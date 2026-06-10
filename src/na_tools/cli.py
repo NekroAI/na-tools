@@ -11,6 +11,7 @@ from . import __version__
 from .commands.backup import backup
 from .commands.bind import bind
 from .commands.config_cmd import config
+from .commands.daemon import daemon
 from .commands.install import install
 from .commands.list_cmd import list_cmd
 from .commands.logs import logs
@@ -23,7 +24,7 @@ from .commands.use import use
 
 # 命令分组：(分组名, [命令名...])
 COMMAND_GROUPS: list[tuple[str, list[str]]] = [
-    ("部署管理", ["install", "update", "remove"]),
+    ("部署管理", ["install", "update", "remove", "daemon"]),
     ("实例管理", ["bind", "use", "list", "status"]),
     ("数据管理", ["backup", "restore", "config"]),
     ("日志与工具", ["logs", "napcat"]),
@@ -122,6 +123,7 @@ main.add_command(update)
 main.add_command(backup)
 main.add_command(restore)
 main.add_command(config)
+main.add_command(daemon)
 main.add_command(status)
 main.add_command(logs)
 main.add_command(use)
