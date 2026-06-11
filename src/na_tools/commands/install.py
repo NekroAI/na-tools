@@ -14,6 +14,7 @@ from ..core.compose import (
 from ..core.config import load_env, setup_env
 from ..core.docker import DockerEnv
 from ..core.platform import default_data_dir, resolve_mirror, set_default_data_dir
+from ..daemon.channel import ensure_daemon_channel
 from ..utils.privilege import with_sudo_fallback
 from ..utils.console import confirm, error, info, print_panel, prompt, warning
 
@@ -99,6 +100,13 @@ def install(
         info("使用 preview 频道镜像...")
         if not set_image_tag(data_dir_path, "kromiose/nekro-agent", "preview"):
             warning("无法修改镜像 tag，将使用默认 latest 版本。")
+
+    daemon_channel = ensure_daemon_channel(data_dir_path, overwrite_env=True)
+    info(f"daemon 实例 ID: {daemon_channel.instance_id}")
+    if daemon_channel.compose_warning:
+        warning(f"daemon compose 配置未自动合并: {daemon_channel.compose_warning}")
+    elif daemon_channel.compose_updated:
+        info("已写入 daemon compose 环境变量和 host gateway。")
 
     # 7. 拉取服务镜像
     info("正在拉取服务镜像...")

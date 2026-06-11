@@ -17,7 +17,15 @@ from ..core.compose import COMPOSE_FILE, SERVICE_AGENT
 from ..core.config import get_container_name, load_env
 from ..core.docker import DockerEnv
 from ..services.update_service import read_agent_image
-from . import JOB_LOG_RETENTION_DAYS, PROTOCOL_VERSION, PROVIDER
+from . import (
+    DEFAULT_DAEMON_API_BASE,
+    DEFAULT_DAEMON_SOCKS_URL,
+    DEFAULT_SOCKS_BIND_HOST,
+    DEFAULT_SOCKS_BIND_PORT,
+    JOB_LOG_RETENTION_DAYS,
+    PROTOCOL_VERSION,
+    PROVIDER,
+)
 
 
 class DockerSummary(Protocol):
@@ -65,17 +73,37 @@ class InstanceRegistry:
         self.started_at = started_at or _utc_now()
         self.instance_id: str = ""
         self.http_bind = "127.0.0.1:18081"
+        self.socks_bind = f"{DEFAULT_SOCKS_BIND_HOST}:{DEFAULT_SOCKS_BIND_PORT}"
+        self.api_base = DEFAULT_DAEMON_API_BASE
+        self.socks_url = DEFAULT_DAEMON_SOCKS_URL
+        self.daemon_pid: int | None = None
 
-    def prepare(self, *, http_bind: str) -> None:
+    def prepare(
+        self,
+        *,
+        http_bind: str,
+        socks_bind: str | None = None,
+        api_base: str = DEFAULT_DAEMON_API_BASE,
+        socks_url: str = DEFAULT_DAEMON_SOCKS_URL,
+        write_pid: bool = True,
+        daemon_pid: int | None = None,
+    ) -> None:
         """Create daemon metadata and calculate the stable instance id."""
 
         self.http_bind = http_bind
+        self.socks_bind = socks_bind or self.socks_bind
+        self.api_base = api_base
+        self.socks_url = socks_url
+        self.daemon_pid = daemon_pid if daemon_pid is not None else (
+            os.getpid() if write_pid else None
+        )
         self.paths.meta_dir.mkdir(parents=True, exist_ok=True)
         self.paths.jobs_dir.mkdir(parents=True, exist_ok=True)
         self._ensure_token()
         self._ensure_salt()
         self.instance_id = self._calculate_instance_id()
-        self._write_pid()
+        if write_pid and self.daemon_pid is not None:
+            self._write_pid(self.daemon_pid)
         self._write_daemon_json()
 
     def token(self) -> bytes:
@@ -187,25 +215,48 @@ class InstanceRegistry:
         material = "\0".join([str(self.data_dir), project_name, salt])
         return "sha256:" + hashlib.sha256(material.encode("utf-8")).hexdigest()
 
-    def _write_pid(self) -> None:
-        self.paths.pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    def _write_pid(self, daemon_pid: int) -> None:
+        self.paths.pid_file.write_text(f"{daemon_pid}\n", encoding="utf-8")
 
     def _write_daemon_json(self) -> None:
+        existing = self._read_daemon_json()
+        daemon_pid = self.daemon_pid
+        if daemon_pid is None and isinstance(existing.get("daemon_pid"), int):
+            daemon_pid = existing["daemon_pid"]
+        started_at = self.started_at
+        if (
+            daemon_pid is not None
+            and self.daemon_pid is None
+            and isinstance(existing.get("started_at"), str)
+        ):
+            started_at = existing["started_at"]
+
         data = {
             "protocol_version": PROTOCOL_VERSION,
-            "api_base": f"http://{self.http_bind}/v1",
+            "api_base": self.api_base,
+            "socks_url": self.socks_url,
             "instance_id": self.instance_id,
             "data_dir": str(self.data_dir),
             "token_file": str(self.paths.token_file),
             "http_bind": self.http_bind,
-            "daemon_pid": os.getpid(),
+            "socks_bind": self.socks_bind,
+            "daemon_pid": daemon_pid,
             "daemon_version": __version__,
-            "started_at": self.started_at,
+            "started_at": started_at,
         }
         self.paths.daemon_json.write_text(
             json.dumps(data, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
+
+    def _read_daemon_json(self) -> dict[str, object]:
+        if not self.paths.daemon_json.exists():
+            return {}
+        try:
+            data = json.loads(self.paths.daemon_json.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+        return data if isinstance(data, dict) else {}
 
 
 def _utc_now() -> str:

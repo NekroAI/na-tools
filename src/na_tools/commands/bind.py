@@ -9,7 +9,8 @@ from ..core.platform import (
     load_global_config,
     save_global_config,
 )
-from ..utils.console import confirm, error, info, prompt, success
+from ..daemon.channel import ensure_daemon_channel
+from ..utils.console import confirm, error, info, prompt, success, warning
 from ..utils.privilege import with_sudo_fallback
 
 
@@ -79,6 +80,12 @@ def bind(data_dir: str | None, name: str | None, as_current: bool | None) -> Non
         installations = {}
 
     str_path = str(data_dir_path)
+    daemon_channel = ensure_daemon_channel(data_dir_path, overwrite_env=False)
+    info(f"daemon 实例 ID: {daemon_channel.instance_id}")
+    if daemon_channel.compose_warning:
+        warning(f"daemon compose 配置未自动合并: {daemon_channel.compose_warning}")
+    elif daemon_channel.compose_updated:
+        info("已补齐 daemon compose 环境变量和 host gateway。")
 
     if str_path in installations:
         info(f"该 NA 实例已在管理列表中: {str_path}")

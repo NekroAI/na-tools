@@ -14,12 +14,19 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from .. import __version__
 from ..core.docker import DockerEnv
-from . import DEFAULT_BIND_HOST, DEFAULT_BIND_PORT, PROTOCOL_VERSION
+from . import (
+    DEFAULT_BIND_HOST,
+    DEFAULT_BIND_PORT,
+    DEFAULT_SOCKS_BIND_HOST,
+    DEFAULT_SOCKS_BIND_PORT,
+    PROTOCOL_VERSION,
+)
 from .auth import HMACAuthenticator
 from .errors import DaemonAPIError
 from .instances import InstanceRegistry
 from .jobs import JobManager, TERMINAL_STATUSES
 from .logs import LogStore
+from .socks import Socks5Server
 
 
 def create_app(
@@ -27,13 +34,16 @@ def create_app(
     *,
     host: str = DEFAULT_BIND_HOST,
     port: int = DEFAULT_BIND_PORT,
+    socks_host: str = DEFAULT_SOCKS_BIND_HOST,
+    socks_port: int = DEFAULT_SOCKS_BIND_PORT,
+    enable_socks: bool = False,
     docker_factory: Callable[[], Any] = DockerEnv,
     update_service_factory: Callable[[], Any] | None = None,
 ) -> FastAPI:
     """Create the daemon FastAPI app for one bound instance."""
 
     registry = InstanceRegistry(Path(data_dir), docker_factory=docker_factory)
-    registry.prepare(http_bind=f"{host}:{port}")
+    registry.prepare(http_bind=f"{host}:{port}", socks_bind=f"{socks_host}:{socks_port}")
     log_store = LogStore(registry.paths.jobs_dir)
     job_manager = JobManager(
         registry=registry,
@@ -44,12 +54,26 @@ def create_app(
         instance_id=registry.instance_id,
         token_getter=registry.token,
     )
+    socks_server = (
+        Socks5Server(
+            bind_host=socks_host,
+            bind_port=socks_port,
+            http_host=host,
+            http_port=port,
+        )
+        if enable_socks
+        else None
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        if socks_server is not None:
+            socks_server.start()
         try:
             yield
         finally:
+            if socks_server is not None:
+                socks_server.stop()
             job_manager.shutdown()
 
     app = FastAPI(title="NA-Tools Daemon", version=__version__, lifespan=lifespan)
@@ -57,6 +81,7 @@ def create_app(
     app.state.log_store = log_store
     app.state.job_manager = job_manager
     app.state.authenticator = authenticator
+    app.state.socks_server = socks_server
 
     @app.exception_handler(DaemonAPIError)
     async def daemon_api_error_handler(
