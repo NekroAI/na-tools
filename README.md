@@ -24,6 +24,8 @@ uv sync
 | 命令 | 说明 |
 |------|------|
 | `na-tools install` | 安装 Nekro Agent（Docker 检测 → 配置 → 部署） |
+| `na-tools start` | 启动当前或指定实例的 Docker Compose 编排 |
+| `na-tools stop` | 关闭当前或指定实例的 Docker Compose 编排 |
 | `na-tools update` | 更新服务到最新版本 |
 | `na-tools remove` | 卸载并移除指定的 NA 实例 |
 
@@ -66,6 +68,10 @@ na-tools config "docker.1ms.run"
 
 # 更新到最新版
 na-tools update
+
+# 启动 / 关闭编排
+na-tools start
+na-tools stop
 
 # 备份数据
 na-tools backup
@@ -207,6 +213,10 @@ na-tools use 2
 
 # 移除实例（保留数据）
 na-tools remove --keep-data
+
+# 直接启动或关闭指定实例编排
+na-tools start --data-dir ~/nekro_agent_prod
+na-tools stop --data-dir ~/nekro_agent_prod
 ```
 
 ## 跨平台支持

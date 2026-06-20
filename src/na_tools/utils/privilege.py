@@ -54,6 +54,9 @@ def with_sudo_fallback(func: Callable[P, R]) -> Callable[P, R]:
         except Exception as e:
             if is_permission_error(e):
                 error(f"由于权限不足导致操作中断: {e}")
+                # 如果在 daemon 模式下，不尝试交互式提权，直接抛出异常
+                if os.environ.get("NA_TOOLS_DAEMON_MODE") == "1":
+                    raise
                 if os.name != "nt" and hasattr(os, "geteuid") and os.geteuid() != 0:
                     warning("检测到权限问题，将尝试获取管理员权限(root)以完成配置。")
                     info("请在下方输入您的当前用户密码：")

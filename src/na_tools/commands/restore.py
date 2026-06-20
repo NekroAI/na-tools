@@ -1,5 +1,6 @@
 """restore 命令：从备份恢复 Nekro Agent 数据。"""
 
+import shutil
 import tarfile
 from pathlib import Path
 
@@ -8,8 +9,8 @@ import click
 from ..core.compose import resolve_service_volumes
 from ..core.docker import DockerEnv
 from ..core.platform import default_data_dir, get_global_config_dir, resolve_mirror
-from ..utils.privilege import with_sudo_fallback
 from ..utils.console import confirm, console, error, info, success, warning
+from ..utils.privilege import with_sudo_fallback
 from .backup import parse_backup_name
 
 
@@ -103,7 +104,6 @@ def restore(backup_file: str | None, data_dir: str | None) -> None:
 
             # 解压到临时位置然后移动
             import tempfile
-            import shutil
 
             with tempfile.TemporaryDirectory() as tmp_dir:
                 import sys
@@ -124,6 +124,10 @@ def restore(backup_file: str | None, data_dir: str | None) -> None:
                 if extracted_dir.exists():
                     # 确保目标目录存在
                     data_dir_path.mkdir(parents=True, exist_ok=True)
+                    mirror = resolve_mirror(env_path if env_path.exists() else None)
+                    alpine_image = (
+                        f"{mirror}/alpine:latest" if mirror else "alpine:latest"
+                    )
                     # 复制内容 (跳过 volumes 目录，因为它不需要复制到 data_dir，而是恢复到 docker volume)
                     for item in extracted_dir.iterdir():
                         if item.name == "volumes":
@@ -131,10 +135,9 @@ def restore(backup_file: str | None, data_dir: str | None) -> None:
 
                         dest = data_dir_path / item.name
                         if dest.exists():
-                            if dest.is_dir():
-                                shutil.rmtree(dest)
-                            else:
-                                dest.unlink()
+                            _remove_existing_path(
+                                dest, data_dir_path, docker, alpine_image
+                            )
                         _ = shutil.move(str(item), str(dest))
 
                 # 恢复存储卷
@@ -154,9 +157,6 @@ def restore(backup_file: str | None, data_dir: str | None) -> None:
                         )
 
                         env_file = env_path if env_path.exists() else None
-                        # 解析镜像源
-                        mirror = resolve_mirror(env_path if env_path.exists() else None)
-                        alpine_image = f"{mirror}/alpine:latest" if mirror else "alpine:latest"
                         # 建立 备份文件名 -> 卷名 的映射
                         volume_map = {
                             filename: vol_name
@@ -214,3 +214,51 @@ def restore(backup_file: str | None, data_dir: str | None) -> None:
                 warning("服务启动失败，请手动启动。")
 
     success("🎉 恢复完成!")
+
+
+def _remove_existing_path(
+    path: Path,
+    data_dir: Path,
+    docker: DockerEnv,
+    alpine_image: str,
+) -> None:
+    """Remove an existing restore target, using Docker for container-owned files."""
+
+    try:
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+        return
+    except PermissionError as exc:
+        if _remove_existing_path_with_docker(path, data_dir, docker, alpine_image):
+            return
+        raise exc
+
+
+def _remove_existing_path_with_docker(
+    path: Path,
+    data_dir: Path,
+    docker: DockerEnv,
+    alpine_image: str,
+) -> bool:
+    try:
+        relative = path.relative_to(data_dir)
+    except ValueError:
+        return False
+
+    if len(relative.parts) != 1:
+        return False
+
+    warning(f"检测到容器写入的受限文件，尝试通过 Docker 清理: {path}")
+    return docker.run_ephemeral(
+        image=alpine_image,
+        cmd=[
+            "sh",
+            "-c",
+            'rm -rf -- "$1"',
+            "sh",
+            f"/restore-target/{relative.name}",
+        ],
+        volumes={str(data_dir): "/restore-target"},
+    )

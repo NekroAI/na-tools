@@ -1,15 +1,34 @@
 """Docker / Docker Compose 环境检测与操作。"""
 
 import json
+import os
 import shutil
 import subprocess
-from pathlib import Path
 import tempfile
+from pathlib import Path
+from typing import Literal
 
 
 from ..utils.console import confirm, error, info, prompt, success, warning
-from .platform import is_macos, run_cmd
 from ..utils.privilege import is_permission_error
+from .platform import is_macos, run_cmd
+
+DockerAccessErrorCode = Literal[
+    "docker_unavailable",
+    "docker_not_running",
+    "docker_permission_denied",
+    "docker_socket_missing",
+]
+
+_DEFAULT_DOCKER_SOCKET = Path("/var/run/docker.sock")
+_DOCKER_ACCESS_MESSAGES: dict[DockerAccessErrorCode, str] = {
+    "docker_unavailable": "Docker 或 Docker Compose 不可用。",
+    "docker_not_running": "宿主 Docker 未运行或无法连接。",
+    "docker_permission_denied": (
+        "NA-Tools daemon 无权访问宿主 Docker，请用具备 Docker 权限的用户重启 daemon。"
+    ),
+    "docker_socket_missing": "未找到宿主 Docker socket，请确认 Docker 已启动。",
+}
 
 
 def _find_docker() -> str | None:
@@ -37,6 +56,12 @@ def _detect_compose_cmd() -> list[str] | None:
     return None
 
 
+def docker_access_error_message(code: DockerAccessErrorCode) -> str:
+    """Return a user-facing message for a daemon Docker access error."""
+
+    return _DOCKER_ACCESS_MESSAGES[code]
+
+
 class DockerEnv:
     """Docker 环境管理。"""
 
@@ -51,6 +76,23 @@ class DockerEnv:
     @property
     def compose_installed(self) -> bool:
         return self.compose_cmd is not None
+
+    def check_access(self) -> DockerAccessErrorCode | None:
+        """Check whether the current process can talk to the Docker API."""
+
+        if not self.docker_installed or not self.compose_installed:
+            return "docker_unavailable"
+
+        socket_error = _docker_socket_error()
+        if socket_error is not None:
+            return socket_error
+
+        assert self.docker_path is not None
+        try:
+            _ = run_cmd([self.docker_path, "info"], capture=True, check=True)
+        except (subprocess.CalledProcessError, OSError) as exc:
+            return _classify_docker_access_error(exc)
+        return None
 
     def print_status(self) -> None:
         if self.docker_installed:
@@ -391,3 +433,54 @@ class DockerEnv:
                 raise
             return None
         return None
+
+
+def _docker_socket_error() -> DockerAccessErrorCode | None:
+    if os.name == "nt":
+        return None
+
+    docker_host = os.environ.get("DOCKER_HOST", "").strip()
+    if docker_host and not docker_host.startswith("unix://"):
+        return None
+
+    socket_path = (
+        Path(docker_host.removeprefix("unix://"))
+        if docker_host
+        else _DEFAULT_DOCKER_SOCKET
+    )
+    if not socket_path.exists():
+        return "docker_socket_missing"
+    if not os.access(socket_path, os.R_OK | os.W_OK):
+        return "docker_permission_denied"
+    return None
+
+
+def _classify_docker_access_error(
+    exc: subprocess.CalledProcessError | OSError,
+) -> DockerAccessErrorCode:
+    if is_permission_error(exc):
+        return "docker_permission_denied"
+
+    message = _exception_text(exc)
+    if "permission denied" in message:
+        return "docker_permission_denied"
+    if "no such file or directory" in message and "docker.sock" in message:
+        return "docker_socket_missing"
+    if (
+        "cannot connect to the docker daemon" in message
+        or "is the docker daemon running" in message
+        or "connection refused" in message
+        or "connection reset" in message
+    ):
+        return "docker_not_running"
+    return "docker_unavailable"
+
+
+def _exception_text(exc: subprocess.CalledProcessError | OSError) -> str:
+    parts = [str(exc)]
+    if isinstance(exc, subprocess.CalledProcessError):
+        if exc.stdout:
+            parts.append(str(exc.stdout))
+        if exc.stderr:
+            parts.append(str(exc.stderr))
+    return "\n".join(parts).lower()
