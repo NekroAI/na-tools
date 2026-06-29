@@ -1,75 +1,31 @@
 """backup 命令：备份 Nekro Agent 数据。"""
 
-import shutil
-import tarfile
 from datetime import datetime
 from pathlib import Path
 
 import click
 
-from ..core.compose import compose_exists, resolve_service_volumes
-from ..core.docker import DockerEnv
-from ..core.platform import default_data_dir, get_global_config_dir, resolve_mirror
-from ..utils.privilege import with_sudo_fallback
+from ..core.platform import default_data_dir
+from ..services.backup_service import (
+    BackupRequest,
+    BackupService,
+    BackupServiceError,
+    parse_backup_name,
+)
+from ..services.common import ServiceEvent
 from ..utils.console import console, error, info, success, warning
-
-# 备份时排除的缓存/临时文件模式
-_CACHE_PATTERNS: list[str] = [
-    "napcat_data/QQ/nt_qq/*/nt_data/Log",  # napcat QQ 日志
-    "napcat_data/QQ/nt_qq/*/nt_temp",  # napcat 临时文件
-    "napcat_data/QQ/Crashpad",  # 崩溃转储
-    "logs",  # 所有日志
-]
+from ..utils.privilege import with_sudo_fallback
 
 
-def _is_cache_path(arcname: str) -> bool:
-    """判断归档路径是否匹配缓存模式（支持通配符 *）。"""
-    from fnmatch import fnmatch
-
-    # arcname 格式: "data_dir_name/napcat_data/QQ/..."，跳过第一段
-    parts = arcname.split("/", 1)
-    if len(parts) < 2:
-        return False
-    rel = parts[1]
-    return any(fnmatch(rel, pat) or fnmatch(rel, pat + "/*") for pat in _CACHE_PATTERNS)
-
-
-def parse_backup_name(filename: str) -> str | None:
-    """从备份文件名中解析自定义名称。
-
-    文件名格式：
-      - 无名称: {dir}_backup_{YYYYMMDD}_{HHMMSS}.tar.gz
-      - 有名称: {dir}_backup_{name}_{YYYYMMDD}_{HHMMSS}.tar.gz
-
-    通过检查倒数第二、三段是否为时间戳来判断。
-    """
-    stem = filename
-    for suffix in (".tar.gz", ".tar", ".gz"):
-        if stem.endswith(suffix):
-            stem = stem[: -len(suffix)]
-            break
-
-    parts = stem.split("_")
-    # 至少需要: dir, backup, YYYYMMDD, HHMMSS → 4 段
-    if len(parts) < 4:
-        return None
-
-    # 检查最后两段是否为时间戳（纯数字，长度 8 和 6）
-    if not (parts[-2].isdigit() and len(parts[-2]) == 8 and parts[-1].isdigit() and len(parts[-1]) == 6):
-        return None
-
-    # 找到 "backup" 关键字的位置
-    try:
-        backup_idx = parts.index("backup")
-    except ValueError:
-        return None
-
-    # backup 和时间戳之间的部分就是 name
-    name_parts = parts[backup_idx + 1 : -2]
-    if not name_parts:
-        return None
-
-    return "_".join(name_parts)
+def _render_event(event: ServiceEvent) -> None:
+    if event.level == "success":
+        success(event.message)
+    elif event.level == "warning":
+        warning(event.message)
+    elif event.level == "error":
+        error(event.message)
+    else:
+        info(event.message)
 
 
 @click.group(invoke_without_command=True)
@@ -82,7 +38,10 @@ def parse_backup_name(filename: str) -> str | None:
 @click.option("--no-restart", is_flag=True, default=False, help="备份后不重启服务")
 @click.option("--name", default=None, help="备份名称标识（例如 pre-preview）")
 def backup(
-    ctx: click.Context, data_dir: str | None, output: str | None, no_restart: bool,
+    ctx: click.Context,
+    data_dir: str | None,
+    output: str | None,
+    no_restart: bool,
     name: str | None,
 ) -> None:
     """备份 Nekro Agent 数据和配置。"""
@@ -92,135 +51,26 @@ def backup(
     if ctx.invoked_subcommand is not None:
         return
 
-    data_dir_path = Path(data_dir or default_data_dir()).expanduser().resolve()
-
-    if not data_dir_path.exists():
-        error(f"数据目录不存在: {data_dir_path}")
-        raise click.Abort()
-
-    docker = DockerEnv()
-    env_path = data_dir_path / ".env"
-
-    # 生成备份文件名
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    if output:
-        backup_path = Path(output)
-    else:
-        backup_dir = get_global_config_dir() / "backup" / data_dir_path.name
-        backup_dir.mkdir(parents=True, exist_ok=True)
-        name_part = f"{name}_" if name else ""
-        backup_path = backup_dir / f"{data_dir_path.name}_backup_{name_part}{timestamp}.tar.gz"
-
-    backup_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # 准备备份存储卷（在停止服务前解析卷名）
-    volume_backups_map: list[
-        tuple[str, str, Path]
-    ] = []  # (volume_name, backup_filename, backup_path)
-    volumes_dir = data_dir_path / "volumes_backup_tmp"
-
-    if compose_exists(data_dir_path) and docker.compose_installed:
-        env_file = env_path if env_path.exists() else None
-        for vol_name, filename in resolve_service_volumes(
-            docker, data_dir_path, env_file
-        ):
-            volume_backups_map.append((vol_name, filename, volumes_dir / filename))
-
-    # 停止服务
-    should_restart = False
-    if compose_exists(data_dir_path) and docker.compose_installed:
-        info("正在停止服务以确保数据一致性...")
-        if not docker.down(
-            cwd=data_dir_path, env_file=env_path if env_path.exists() else None
-        ):
-            error("服务停止失败，为避免备份数据不一致，已中止备份。")
-            raise click.Abort()
-        should_restart = True
-
-    # 执行卷备份
-    volume_backups: list[Path] = []
-    if volume_backups_map:
-        mirror = resolve_mirror(env_path if env_path.exists() else None)
-        alpine_images = [f"{mirror}/alpine:latest", "alpine:latest"] if mirror else ["alpine:latest"]
-        volumes_dir.mkdir(exist_ok=True)
-        for vol_name, filename, backup_file in volume_backups_map:
-            info(f"正在备份存储卷 {vol_name}...")
-
-            success_backup = False
-            for img in alpine_images:
-                success_backup = docker.run_ephemeral(
-                    image=img,
-                    cmd=["tar", "czf", f"/backup/{filename}", "-C", "/data", "."],
-                    volumes={vol_name: "/data", str(volumes_dir): "/backup"},
-                )
-                if success_backup:
-                    break
-                if img != alpine_images[-1]:
-                    warning(f"镜像 {img} 拉取失败，尝试回退...")
-
-            if success_backup:
-                volume_backups.append(backup_file)
-                success(f"卷备份完成: {filename}")
-            else:
-                error(f"卷备份失败: {vol_name}")
-
-    # 打包数据
-    info(f"正在备份数据到: {backup_path}")
-    skipped_cache = 0
-
-    def _tar_filter(ti: tarfile.TarInfo) -> tarfile.TarInfo | None:
-        nonlocal skipped_cache
-        if "volumes_backup_tmp" in ti.name:
-            return None
-        if _is_cache_path(ti.name):
-            skipped_cache += 1
-            return None
-        return ti
-
     try:
-        with tarfile.open(backup_path, "w:gz") as tar:
-            # 添加主数据目录
-            tar.add(
-                data_dir_path,
-                arcname=data_dir_path.name,
-                filter=_tar_filter,
-            )
-
-            # 添加卷备份
-            if volume_backups:
-                # 在 tar 中创建一个 volumes 目录
-                for vb in volume_backups:
-                    tar.add(vb, arcname=f"volumes/{vb.name}")
-
-        success(
-            f"备份完成: {backup_path} ({backup_path.stat().st_size / 1024 / 1024:.1f} MB)"
+        result = BackupService().run(
+            BackupRequest(
+                data_dir=Path(data_dir).expanduser().resolve() if data_dir else None,
+                output=Path(output).expanduser().resolve() if output else None,
+                no_restart=no_restart,
+                name=name,
+            ),
+            _render_event,
         )
-        if skipped_cache:
-            info(f"已跳过 {skipped_cache} 个缓存/临时文件。")
-    except Exception as e:
-        error(f"备份失败: {e}")
-        # 即使备份失败也要尝试重启
-        if should_restart and not no_restart:
-            info("正在重新启动服务...")
-            _ = docker.up(
-                cwd=data_dir_path, env_file=env_path if env_path.exists() else None
-            )
-        raise click.Abort()
-    finally:
-        # 清理临时卷备份目录
-        if volumes_dir.exists():
-            shutil.rmtree(volumes_dir)
+    except BackupServiceError as exc:
+        error(exc.message)
+        raise click.Abort() from exc
 
-    # 重启服务
-    if should_restart and not no_restart:
-        info("正在重新启动服务...")
-        if docker.up(
-            cwd=data_dir_path, env_file=env_path if env_path.exists() else None
-        ):
-            success("服务已重新启动。")
-        else:
-            warning("服务重启失败，请手动启动。")
-
+    success(
+        f"备份完成: {result.backup_path} "
+        f"({result.size_bytes / 1024 / 1024:.1f} MB)"
+    )
+    if result.skipped_cache:
+        info(f"已跳过 {result.skipped_cache} 个缓存/临时文件。")
     success("🎉 备份完成!")
 
 
@@ -242,29 +92,17 @@ def list_backups(
     obj = ctx.ensure_object(dict)
     data_dir: str | None = obj.get("data_dir")
     data_dir_path = Path(data_dir or default_data_dir()).expanduser().resolve()
-    backup_dir = get_global_config_dir() / "backup" / data_dir_path.name
-
-    if not backup_dir.exists():
-        info("备份目录不存在或为空。")
-        return
-
-    backups = sorted(
-        list(backup_dir.glob("*.tar.gz")),
-        key=lambda x: x.stat().st_mtime,
-        reverse=True,
+    backups = BackupService().list_backups(
+        data_dir_path,
+        name=filter_name,
+        limit=limit,
     )
-
-    if filter_name:
-        backups = [b for b in backups if parse_backup_name(b.name) == filter_name]
-
-    if limit is not None:
-        backups = backups[:limit]
 
     if not backups:
         if filter_name:
             info(f"没有找到名称为 {filter_name} 的历史备份。")
             return
-        info("没有任何历史备份。")
+        info("备份目录不存在或为空。")
         return
 
     filters: list[str] = []
@@ -275,10 +113,13 @@ def list_backups(
     filter_text = f"（{', '.join(filters)}）" if filters else ""
 
     info(f"发现以下历史备份{filter_text}：")
-    for i, b in enumerate(backups, 1):
-        mtime = datetime.fromtimestamp(b.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
-        bk_name = parse_backup_name(b.name)
-        name_str = f", 名称: {bk_name}" if bk_name else ""
+    for i, backup_summary in enumerate(backups, 1):
+        mtime = datetime.fromtimestamp(
+            backup_summary.path.stat().st_mtime
+        ).strftime("%Y-%m-%d %H:%M:%S")
+        name_str = f", 名称: {backup_summary.name}" if backup_summary.name else ""
         console.print(
-            f"  [{i}] {b.name} (备份时间: {mtime}{name_str}, 大小: {b.stat().st_size / 1024 / 1024:.1f} MB)"
+            f"  [{i}] {backup_summary.path.name} "
+            f"(备份时间: {mtime}{name_str}, "
+            f"大小: {backup_summary.size_bytes / 1024 / 1024:.1f} MB)"
         )

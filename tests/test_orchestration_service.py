@@ -24,16 +24,45 @@ class FakeDocker:
         self.compose_installed = compose_installed
         self.up_ok = up_ok
         self.down_ok = down_ok
+        self.events: list[str] = []
         self.ups: list[tuple[Path, Path | None]] = []
         self.downs: list[tuple[Path, Path | None]] = []
 
     def up(self, cwd: Path, env_file: Path | None = None) -> bool:
+        self.events.append("compose_up")
         self.ups.append((cwd, env_file))
         return self.up_ok
 
     def down(self, cwd: Path, env_file: Path | None = None) -> bool:
+        self.events.append("compose_down")
         self.downs.append((cwd, env_file))
         return self.down_ok
+
+
+class FakeDaemonManager:
+    def __init__(self, events: list[str] | None = None, *, missing: bool = False) -> None:
+        self.events = events if events is not None else []
+        self.missing = missing
+        self.starts: list[Path] = []
+        self.stops: list[Path] = []
+
+    def start_registered(self, data_dir: Path) -> object:
+        if self.missing:
+            from na_tools.services.daemon_service import DaemonServiceError
+
+            raise DaemonServiceError("daemon_service_missing", "missing")
+        self.events.append("daemon_start")
+        self.starts.append(data_dir)
+        return object()
+
+    def stop_registered(self, data_dir: Path) -> object:
+        if self.missing:
+            from na_tools.services.daemon_service import DaemonServiceError
+
+            raise DaemonServiceError("daemon_service_missing", "missing")
+        self.events.append("daemon_stop")
+        self.stops.append(data_dir)
+        return object()
 
 
 class OrchestrationServiceTest(unittest.TestCase):
@@ -54,7 +83,11 @@ class OrchestrationServiceTest(unittest.TestCase):
         service = OrchestrationService(docker_factory=lambda: docker)
 
         result = service.run(
-            OrchestrationRequest(data_dir=self.data_dir, action="start")
+            OrchestrationRequest(
+                data_dir=self.data_dir,
+                action="start",
+                with_daemon=False,
+            )
         )
 
         self.assertEqual(result.action, "start")
@@ -67,7 +100,11 @@ class OrchestrationServiceTest(unittest.TestCase):
         service = OrchestrationService(docker_factory=lambda: docker)
 
         result = service.run(
-            OrchestrationRequest(data_dir=self.data_dir, action="stop")
+            OrchestrationRequest(
+                data_dir=self.data_dir,
+                action="stop",
+                with_daemon=False,
+            )
         )
 
         self.assertEqual(result.action, "stop")
@@ -81,7 +118,13 @@ class OrchestrationServiceTest(unittest.TestCase):
         service = OrchestrationService(docker_factory=lambda: docker)
 
         with self.assertRaises(OrchestrationServiceError) as raised:
-            service.run(OrchestrationRequest(data_dir=self.data_dir, action="start"))
+            service.run(
+                OrchestrationRequest(
+                    data_dir=self.data_dir,
+                    action="start",
+                    with_daemon=False,
+                )
+            )
 
         self.assertEqual(raised.exception.code, "compose_missing")
         self.assertEqual(docker.ups, [])
@@ -92,7 +135,13 @@ class OrchestrationServiceTest(unittest.TestCase):
         )
 
         with self.assertRaises(OrchestrationServiceError) as raised:
-            service.run(OrchestrationRequest(data_dir=self.data_dir, action="stop"))
+            service.run(
+                OrchestrationRequest(
+                    data_dir=self.data_dir,
+                    action="stop",
+                    with_daemon=False,
+                )
+            )
 
         self.assertEqual(raised.exception.code, "docker_unavailable")
 
@@ -100,9 +149,59 @@ class OrchestrationServiceTest(unittest.TestCase):
         service = OrchestrationService(docker_factory=lambda: FakeDocker(up_ok=False))
 
         with self.assertRaises(OrchestrationServiceError) as raised:
-            service.run(OrchestrationRequest(data_dir=self.data_dir, action="start"))
+            service.run(
+                OrchestrationRequest(
+                    data_dir=self.data_dir,
+                    action="start",
+                    with_daemon=False,
+                )
+            )
 
         self.assertEqual(raised.exception.code, "start_failed")
+
+    def test_start_runs_compose_then_registered_daemon(self) -> None:
+        docker = FakeDocker()
+        daemon = FakeDaemonManager(docker.events)
+        service = OrchestrationService(
+            docker_factory=lambda: docker,
+            daemon_service_manager=daemon,
+        )
+
+        result = service.run(
+            OrchestrationRequest(data_dir=self.data_dir, action="start")
+        )
+
+        self.assertEqual(docker.events, ["compose_up", "daemon_start"])
+        self.assertIsNotNone(result.daemon_service)
+        self.assertEqual(daemon.starts, [self.data_dir.resolve()])
+
+    def test_stop_runs_registered_daemon_then_compose(self) -> None:
+        docker = FakeDocker()
+        daemon = FakeDaemonManager(docker.events)
+        service = OrchestrationService(
+            docker_factory=lambda: docker,
+            daemon_service_manager=daemon,
+        )
+
+        result = service.run(OrchestrationRequest(data_dir=self.data_dir, action="stop"))
+
+        self.assertEqual(docker.events, ["daemon_stop", "compose_down"])
+        self.assertIsNotNone(result.daemon_service)
+        self.assertEqual(daemon.stops, [self.data_dir.resolve()])
+
+    def test_start_missing_registered_daemon_returns_structured_error(self) -> None:
+        docker = FakeDocker()
+        daemon = FakeDaemonManager(docker.events, missing=True)
+        service = OrchestrationService(
+            docker_factory=lambda: docker,
+            daemon_service_manager=daemon,
+        )
+
+        with self.assertRaises(OrchestrationServiceError) as raised:
+            service.run(OrchestrationRequest(data_dir=self.data_dir, action="start"))
+
+        self.assertEqual(raised.exception.code, "daemon_service_missing")
+        self.assertEqual(docker.events, ["compose_up"])
 
     def test_cli_registers_start_and_stop_commands(self) -> None:
         from na_tools.cli import main

@@ -54,6 +54,25 @@ def compose_exists(data_dir: Path) -> bool:
     return (data_dir / COMPOSE_FILE).exists()
 
 
+def list_compose_services(data_dir: Path) -> set[str]:
+    """Return service names declared in docker-compose.yml."""
+    compose_path = data_dir / COMPOSE_FILE
+    if not compose_path.exists():
+        return set()
+
+    import yaml
+
+    with open(compose_path, encoding="utf-8") as f:
+        content = yaml.safe_load(f)
+
+    if not isinstance(content, dict):
+        return set()
+    services = content.get("services")
+    if not isinstance(services, dict):
+        return set()
+    return {str(name) for name in services}
+
+
 def apply_mirror_to_compose(data_dir: Path, mirror: str) -> None:
     """将镜像站应用到 docker-compose.yml 中的所有服务。
 

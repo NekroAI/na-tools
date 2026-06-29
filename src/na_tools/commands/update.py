@@ -5,7 +5,11 @@ from pathlib import Path
 import click
 
 from ..core.platform import default_data_dir
+from ..services.backup_service import BackupRequest as BackupServiceRequest
+from ..services.backup_service import BackupService
 from ..services.job_events import UpdateEvent
+from ..services.restore_service import RestoreRequest as RestoreServiceRequest
+from ..services.restore_service import RestoreService
 from ..services.update_service import (
     BackupRequest,
     RestoreRequest,
@@ -126,47 +130,32 @@ def _console_event_sink(event: UpdateEvent) -> None:
 
 def _make_backup_runner(ctx: click.Context):
     def _backup_runner(request: BackupRequest) -> Path | None:
-        from .backup import backup as backup_cmd
-
-        ctx.invoke(
-            backup_cmd,
-            data_dir=str(request.data_dir),
-            no_restart=request.no_restart,
-            name=request.name,
+        result = BackupService().run(
+            BackupServiceRequest(
+                data_dir=request.data_dir,
+                no_restart=request.no_restart,
+                name=request.name,
+            ),
+            lambda event: _console_event_sink(
+                UpdateEvent(type="log", phase="backup", message=event.message, level=event.level)
+            ),
         )
-        if request.name:
-            return find_latest_named_backup(request.data_dir, request.name)
-        return _find_latest_backup(request.data_dir)
+        return result.backup_path
 
     return _backup_runner
 
 
 def _make_restore_runner(ctx: click.Context):
     def _restore_runner(request: RestoreRequest) -> None:
-        ctx.invoke(
-            _get_restore_cmd(),
-            backup_file=str(request.backup_file),
-            data_dir=str(request.data_dir),
+        _ = RestoreService().run(
+            RestoreServiceRequest(
+                backup_file=request.backup_file,
+                data_dir=request.data_dir,
+                start_service=True,
+            ),
+            lambda event: _console_event_sink(
+                UpdateEvent(type="log", phase="backup", message=event.message, level=event.level)
+            ),
         )
 
     return _restore_runner
-
-
-def _find_latest_backup(data_dir: Path) -> Path | None:
-    from ..core.platform import get_global_config_dir
-
-    backup_dir = get_global_config_dir() / "backup" / data_dir.name
-    if not backup_dir.exists():
-        return None
-    backups = sorted(
-        backup_dir.glob("*.tar.gz"),
-        key=lambda backup_file: backup_file.stat().st_mtime,
-        reverse=True,
-    )
-    return backups[0] if backups else None
-
-
-def _get_restore_cmd() -> click.Command:
-    """延迟导入 restore 命令，避免循环依赖。"""
-    from .restore import restore
-    return restore

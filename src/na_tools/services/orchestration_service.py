@@ -9,6 +9,11 @@ from typing import Literal, Protocol
 
 from ..core.compose import compose_exists
 from ..core.docker import DockerEnv
+from .daemon_service import (
+    DaemonRootServiceManager,
+    DaemonRootServiceResult,
+    DaemonServiceError,
+)
 
 OrchestrationAction = Literal["start", "stop"]
 
@@ -19,6 +24,7 @@ class OrchestrationRequest:
 
     data_dir: Path
     action: OrchestrationAction
+    with_daemon: bool = True
 
 
 @dataclass(frozen=True)
@@ -29,6 +35,7 @@ class OrchestrationResult:
     action: OrchestrationAction
     env_file: Path | None
     command: str
+    daemon_service: DaemonRootServiceResult | None = None
 
 
 class OrchestrationServiceError(RuntimeError):
@@ -68,6 +75,9 @@ class OrchestrationService:
     """Start or stop the compose stack for a bound Nekro Agent instance."""
 
     docker_factory: DockerFactory = field(default=DockerEnv)
+    daemon_service_manager: DaemonRootServiceManager = field(
+        default_factory=DaemonRootServiceManager
+    )
 
     def run(self, request: OrchestrationRequest) -> OrchestrationResult:
         data_dir = request.data_dir.expanduser().resolve()
@@ -91,11 +101,16 @@ class OrchestrationService:
 
         env_path = data_dir / ".env"
         env_file = env_path if env_path.exists() else None
+        daemon_service: DaemonRootServiceResult | None = None
 
         if request.action == "start":
             command = "docker compose up -d"
             ok = docker.up(cwd=data_dir, env_file=env_file)
+            if ok and request.with_daemon:
+                daemon_service = self._start_daemon(data_dir)
         elif request.action == "stop":
+            if request.with_daemon:
+                daemon_service = self._stop_daemon(data_dir)
             command = "docker compose down"
             ok = docker.down(cwd=data_dir, env_file=env_file)
         else:
@@ -117,4 +132,25 @@ class OrchestrationService:
             action=request.action,
             env_file=env_file,
             command=command,
+            daemon_service=daemon_service,
         )
+
+    def _start_daemon(self, data_dir: Path) -> DaemonRootServiceResult:
+        try:
+            return self.daemon_service_manager.start_registered(data_dir)
+        except DaemonServiceError as exc:
+            raise OrchestrationServiceError(
+                exc.code,
+                exc.message,
+                details=exc.details,
+            ) from exc
+
+    def _stop_daemon(self, data_dir: Path) -> DaemonRootServiceResult:
+        try:
+            return self.daemon_service_manager.stop_registered(data_dir)
+        except DaemonServiceError as exc:
+            raise OrchestrationServiceError(
+                exc.code,
+                exc.message,
+                details=exc.details,
+            ) from exc

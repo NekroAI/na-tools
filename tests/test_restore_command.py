@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from na_tools.commands.restore import _remove_existing_path
+from na_tools.services.restore_service import remove_existing_path
 
 
 class FakeDocker:
@@ -40,10 +40,10 @@ def test_remove_existing_path_uses_docker_fallback_for_permission_error(
     docker = FakeDocker(result=True)
 
     with patch(
-        "na_tools.commands.restore.shutil.rmtree",
+        "na_tools.services.restore_service.shutil.rmtree",
         side_effect=PermissionError("denied"),
     ):
-        _remove_existing_path(
+        remove_existing_path(
             target, data_dir, docker, "alpine:latest"  # pyright: ignore[reportArgumentType]
         )
 
@@ -73,11 +73,11 @@ def test_remove_existing_path_reraises_when_docker_fallback_fails(
 
     with (
         patch(
-            "na_tools.commands.restore.shutil.rmtree",
+            "na_tools.services.restore_service.shutil.rmtree",
             side_effect=PermissionError("denied"),
         ),
         pytest.raises(PermissionError, match="denied"),
     ):
-        _remove_existing_path(
+        remove_existing_path(
             target, data_dir, docker, "alpine:latest"  # pyright: ignore[reportArgumentType]
         )

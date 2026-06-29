@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 import re
 import threading
@@ -12,12 +11,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
-import click
-
-from ..commands.backup import backup as backup_command
-from ..commands.backup import parse_backup_name
 from ..core.platform import get_global_config_dir
+from ..services.backup_service import BackupRequest as BackupServiceRequest
+from ..services.backup_service import BackupService, parse_backup_name
 from ..services.job_events import UpdateEvent
+from ..services.restore_service import RestoreRequest as RestoreServiceRequest
+from ..services.restore_service import RestoreService
 from ..services.update_service import (
     BackupRequest,
     RestoreRequest,
@@ -631,24 +630,25 @@ def create_update_service() -> UpdateService:
 def _daemon_backup_runner(request: BackupRequest) -> Path | None:
     backup_dir = get_global_config_dir() / "backup" / request.data_dir.name
     before = set(backup_dir.glob("*.tar.gz")) if backup_dir.exists() else set()
-    args = ["--data-dir", str(request.data_dir)]
-    if request.no_restart:
-        args.append("--no-restart")
-    if request.name:
-        args.extend(["--name", request.name])
     try:
-        backup_command.main(
-            args=args,
-            prog_name="na-tools backup",
-            standalone_mode=False,
+        result = BackupService().run(
+            BackupServiceRequest(
+                data_dir=request.data_dir,
+                no_restart=request.no_restart,
+                name=request.name,
+            )
         )
-    except click.Abort as exc:
+    except Exception as exc:
+        if isinstance(exc, UpdateServiceError):
+            raise
         raise UpdateServiceError(
             "backup_failed",
-            "backup command was aborted",
+            str(exc),
             phase="backup",
             details={"name": request.name or ""},
         ) from exc
+    if result.backup_path.exists():
+        return result.backup_path
 
     backups = sorted(
         backup_dir.glob("*.tar.gz") if backup_dir.exists() else [],
@@ -664,24 +664,23 @@ def _daemon_backup_runner(request: BackupRequest) -> Path | None:
 
 
 def _daemon_restore_runner(request: RestoreRequest) -> None:
-    restore_module = importlib.import_module("na_tools.commands.restore")
-    old_confirm = restore_module.confirm
-    restore_module.confirm = lambda *_args, **_kwargs: True
     try:
-        restore_module.restore.main(
-            args=[str(request.backup_file), "--data-dir", str(request.data_dir)],
-            prog_name="na-tools restore",
-            standalone_mode=False,
+        _ = RestoreService().run(
+            RestoreServiceRequest(
+                backup_file=request.backup_file,
+                data_dir=request.data_dir,
+                start_service=True,
+            )
         )
-    except click.Abort as exc:
+    except Exception as exc:
+        if isinstance(exc, UpdateServiceError):
+            raise
         raise UpdateServiceError(
             "backup_failed",
-            "restore command was aborted",
+            str(exc),
             phase="backup",
             details={"backup_file": str(request.backup_file)},
         ) from exc
-    finally:
-        restore_module.confirm = old_confirm
 
 
 def _serialize_update_result(result: UpdateResult) -> dict[str, Any]:

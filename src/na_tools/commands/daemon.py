@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import socket
 from pathlib import Path
 
 import click
@@ -19,6 +20,7 @@ from ..daemon import (
 from ..daemon.app import create_app
 from ..daemon.socks import resolve_default_socks_bind_host
 from ..utils.console import error, info, success, warning
+from ..utils.privilege import with_sudo_fallback
 
 
 @click.group()
@@ -58,6 +60,8 @@ def start(
 
     resolved_data_dir = Path(data_dir or default_data_dir()).expanduser().resolve()
     resolved_socks_host = socks_host or resolve_default_socks_bind_host()
+    _ensure_bind_available(host, port, "HTTP API")
+    _ensure_bind_available(resolved_socks_host, socks_port, "SOCKS5")
     app = create_app(
         resolved_data_dir,
         host=host,
@@ -77,24 +81,40 @@ def start(
     uvicorn.run(app, host=host, port=port)
 
 
+def _ensure_bind_available(host: str, port: int, label: str) -> None:
+    """Fail early when a daemon listener port is already in use."""
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind((host, port))
+    except OSError as exc:
+        error(f"{label} 监听地址不可用: {host}:{port} ({exc.strerror or exc})")
+        info("如果 na-tools daemon 已经启动，无需重复启动；可运行 `na-tools daemon status` 查看状态。")
+        raise click.Abort() from exc
+
+
 @daemon.command()
 @click.option("--data-dir", type=click.Path(), default=None, help="Nekro Agent data dir")
 @click.option("--json", "as_json", is_flag=True, help="Print raw daemon.json")
 def status(data_dir: str | None, as_json: bool) -> None:
     """Print daemon metadata for the bound instance."""
 
-    resolved_data_dir = Path(data_dir or default_data_dir()).expanduser().resolve()
-    daemon_json = resolved_data_dir / ".na-tools" / "daemon.json"
-    if not daemon_json.exists():
-        error(f"daemon metadata not found: {daemon_json}")
+    from ..services.daemon_service import DaemonService, DaemonServiceError
+
+    try:
+        status_data = DaemonService().status(
+            Path(data_dir).expanduser().resolve() if data_dir else None
+        )
+    except DaemonServiceError as exc:
+        error(exc.message)
         raise click.Abort()
-    payload = json.loads(daemon_json.read_text(encoding="utf-8"))
+    daemon_json = status_data.daemon_json
+    payload = status_data.payload
     if as_json:
         click.echo(json.dumps(payload, indent=2, ensure_ascii=False))
         return
 
-    token_file_value = payload.get("token_file")
-    token_file = Path(str(token_file_value)) if token_file_value else None
+    token_file = status_data.token_file
     click.echo("Daemon status")
     click.echo(f"  daemon.json: {daemon_json} (exists: {daemon_json.exists()})")
     click.echo(
@@ -122,14 +142,20 @@ def status(data_dir: str | None, as_json: bool) -> None:
 
 
 @daemon.command()
+@with_sudo_fallback
 @click.option("--data-dir", type=click.Path(), default=None, help="Nekro Agent data dir")
 def stop(data_dir: str | None) -> None:
-    """Show the daemon pid; service stop is implemented by the supervisor."""
+    """Stop the registered root daemon service."""
+
+    from ..services.daemon_service import DaemonRootServiceManager, DaemonServiceError
 
     resolved_data_dir = Path(data_dir or default_data_dir()).expanduser().resolve()
-    pid_file = resolved_data_dir / ".na-tools" / "daemon.pid"
-    if not pid_file.exists():
-        error(f"daemon pid not found: {pid_file}")
+
+    try:
+        result = DaemonRootServiceManager().stop_registered(resolved_data_dir)
+    except DaemonServiceError as exc:
+        error(exc.message)
+        if exc.code == "daemon_service_missing":
+            info("请先运行 `na-tools install` 注册 daemon 服务。")
         raise click.Abort()
-    info(f"daemon pid: {pid_file.read_text(encoding='utf-8').strip()}")
-    info("stop the process through your shell or service supervisor")
+    success(f"daemon root 服务已停止: {result.service_name}")
