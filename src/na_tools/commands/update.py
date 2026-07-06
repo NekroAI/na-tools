@@ -75,7 +75,7 @@ def update(
         if pre_preview_backup:
             info(f"找到切换前备份: {pre_preview_backup.name}")
             restore_pre_preview = confirm(
-                "是否从 pre-preview 备份还原数据？", default=True
+                "是否从 pre-preview 备份还原数据？", default=False
             )
         channel = "rollback"
         should_backup = False

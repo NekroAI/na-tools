@@ -519,10 +519,14 @@ class JobManager:
     def _request_from_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         return {
             "channel": payload.get("channel", "stable"),
-            "backup": bool(payload.get("backup", True)),
-            "update_sandbox": bool(payload.get("update_sandbox", True)),
-            "update_cc_sandbox": bool(payload.get("update_cc_sandbox", False)),
-            "restore_pre_preview": bool(payload.get("restore_pre_preview", False)),
+            "backup": _payload_bool(payload, "backup", default=True),
+            "update_sandbox": _payload_bool(payload, "update_sandbox", default=True),
+            "update_cc_sandbox": _payload_bool(
+                payload, "update_cc_sandbox", default=False
+            ),
+            "restore_pre_preview": _payload_bool(
+                payload, "restore_pre_preview", default=False
+            ),
         }
 
     def _validate_update_payload(self, payload: dict[str, Any]) -> None:
@@ -535,6 +539,19 @@ class JobManager:
                 "unsupported update channel",
                 details={"channel": channel},
             )
+        for field in (
+            "backup",
+            "update_sandbox",
+            "update_cc_sandbox",
+            "restore_pre_preview",
+        ):
+            if field in payload and not isinstance(payload[field], bool):
+                raise DaemonAPIError(
+                    400,
+                    "invalid_boolean",
+                    f"{field} must be a boolean",
+                    details={"field": field},
+                )
 
     def _validate_common_payload(self, payload: dict[str, Any]) -> None:
         if payload.get("instance_id") != self._registry.instance_id:
@@ -723,3 +740,10 @@ def _status_message(job_type: str, status: str) -> str:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _payload_bool(payload: dict[str, Any], field: str, *, default: bool) -> bool:
+    value = payload.get(field, default)
+    if isinstance(value, bool):
+        return value
+    return default

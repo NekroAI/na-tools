@@ -169,6 +169,33 @@ class DaemonAPITest(unittest.TestCase):
             (self.data_dir / ".na-tools" / "jobs" / f"{job['job_id']}.json").exists()
         )
 
+    def test_rollback_update_defaults_to_not_restoring_pre_preview_backup(self) -> None:
+        payload = self._update_payload()
+        payload["channel"] = "rollback"
+        payload.pop("restore_pre_preview")
+
+        response = self._request("POST", "/v1/jobs/update", json_body=payload)
+        self._wait_for_job(response.json()["job_id"])
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(self.service.requests), 1)
+        self.assertFalse(self.service.requests[0].restore_pre_preview)
+
+    def test_update_job_rejects_string_restore_pre_preview(self) -> None:
+        payload = self._update_payload()
+        payload["channel"] = "rollback"
+        payload["restore_pre_preview"] = "false"
+
+        response = self._request("POST", "/v1/jobs/update", json_body=payload)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "invalid_boolean")
+        self.assertEqual(
+            response.json()["error"]["details"]["field"],
+            "restore_pre_preview",
+        )
+        self.assertEqual(self.service.requests, [])
+
     def test_backup_list_returns_safe_sorted_summaries(self) -> None:
         config_dir = self.root / "config"
         backup_dir = config_dir / "backup" / self.data_dir.name
