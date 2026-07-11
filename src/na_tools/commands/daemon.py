@@ -144,6 +144,25 @@ def status(data_dir: str | None, as_json: bool) -> None:
 @daemon.command()
 @with_sudo_fallback
 @click.option("--data-dir", type=click.Path(), default=None, help="Nekro Agent data dir")
+def register(data_dir: str | None) -> None:
+    """Register and start the root daemon service."""
+
+    from ..services.daemon_service import DaemonRootServiceManager, DaemonServiceError
+
+    resolved_data_dir = Path(data_dir or default_data_dir()).expanduser().resolve()
+
+    try:
+        result = DaemonRootServiceManager().install_and_start(resolved_data_dir)
+    except DaemonServiceError as exc:
+        error(exc.message)
+        raise click.Abort()
+    success(f"daemon root 服务已注册并启动: {result.service_name}")
+    info(f"服务文件: {result.service_path}")
+
+
+@daemon.command()
+@with_sudo_fallback
+@click.option("--data-dir", type=click.Path(), default=None, help="Nekro Agent data dir")
 def stop(data_dir: str | None) -> None:
     """Stop the registered root daemon service."""
 

@@ -27,6 +27,7 @@ uv sync
 | `na-tools stop` | 关闭当前或指定实例的 Docker Compose 编排 |
 | `na-tools update` | 更新服务到最新版本 |
 | `na-tools remove` | 卸载并移除指定的 NA 实例 |
+| `na-tools daemon register` | 主动注册并启动当前或指定实例的 root daemon 服务 |
 
 ### 实例管理
 
@@ -72,6 +73,9 @@ na-tools update
 # 启动 / 关闭编排
 na-tools start
 na-tools stop
+
+# 主动注册并启动 root daemon 服务（适用于迁移或服务文件丢失后的修复）
+na-tools daemon register
 
 # 备份数据
 na-tools backup
