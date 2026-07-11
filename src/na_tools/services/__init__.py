@@ -40,6 +40,10 @@ _EXPORT_MODULES = {
     "UpdateResult": ".update_service",
     "UpdateService": ".update_service",
     "UpdateServiceError": ".update_service",
+    "UpgradeCheckResult": ".upgrade_service",
+    "UpgradeResult": ".upgrade_service",
+    "UpgradeService": ".upgrade_service",
+    "UpgradeServiceError": ".upgrade_service",
 }
 
 __all__ = list(_EXPORT_MODULES)
@@ -76,3 +80,9 @@ if TYPE_CHECKING:
     from .remove_service import RemoveRequest, RemoveResult, RemoveService, RemoveServiceError
     from .restore_service import RestoreRequest, RestoreResult, RestoreService, RestoreServiceError
     from .update_service import UpdateRequest, UpdateResult, UpdateService, UpdateServiceError
+    from .upgrade_service import (
+        UpgradeCheckResult,
+        UpgradeResult,
+        UpgradeService,
+        UpgradeServiceError,
+    )

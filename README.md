@@ -7,13 +7,12 @@
 ## 安装
 
 ```bash
-# 通过 pip 安装（需要 Python 3.10+）
-pip install na-tools
+# 推荐通过 uv tool 安装（需要 Python 3.10+）
+uv tool install na-tools
+
+# 或下载 GitHub Release 中的 Linux x86_64 二进制文件
 
 # 或从源码安装
-pip install -e .
-
-# 或使用 uv
 uv sync
 ```
 
@@ -53,6 +52,7 @@ uv sync
 |------|------|
 | `na-tools logs [service]` | 查看服务日志 |
 | `na-tools napcat` | 引导 NapCat 登录并自动配置 OneBot 连接 |
+| `na-tools upgrade` | 检测并更新 na-tools 自身 |
 
 ## 快速开始
 
@@ -81,7 +81,39 @@ na-tools restore
 
 # 查看状态
 na-tools status
+
+# 检测并更新 na-tools 自身
+na-tools upgrade --check
+na-tools upgrade
 ```
+
+## na-tools 自身更新
+
+`na-tools upgrade` 用于更新部署工具自身，和 `na-tools update`（更新 Nekro Agent 服务）是两个独立命令。
+
+```bash
+# 只检测当前版本是否为最新
+na-tools upgrade --check
+
+# 检测后交互确认并自动更新
+na-tools upgrade
+
+# 跳过确认，适合脚本调用
+na-tools upgrade --yes
+```
+
+版本检测以 `NekroAI/na-tools` 的 GitHub Releases 最新稳定版为准。自动更新支持：
+
+- `uv tool install na-tools` 安装的版本：执行 `uv tool upgrade na-tools`
+- GitHub Release 中的 Linux x86_64 二进制：下载 `na-tools-linux-x86_64`，校验后替换当前可执行文件
+
+源码开发安装、pip 普通安装或其他方式安装的版本仅支持检测，会提示手动更新方式。
+
+除 `upgrade` 外，成功执行其他 na-tools 命令后也会检测最新版本；检测结果会缓存 6 小时，
+缓存过期后才会再次联网。发现新版时会在标准错误流提示运行
+`na-tools upgrade`，但不会自动更新或询问确认。`na-tools --version`
+同样会检测，帮助输出、执行失败或用户取消的命令不会检测。联网检测的各网络阶段超时为
+3 秒，网络或 GitHub API 异常时静默跳过并进入缓存冷却，不影响原命令结果或标准输出。
 
 ## Preview 频道
 

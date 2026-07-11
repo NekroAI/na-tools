@@ -33,3 +33,4 @@ def logs(service: str, data_dir: str | None, follow: bool, tail: int) -> None:
         )
     except InstanceServiceError as exc:
         error(exc.message)
+        raise click.Abort() from exc

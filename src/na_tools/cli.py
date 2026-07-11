@@ -1,6 +1,10 @@
 """NA-Tools CLI 入口。"""
 
+import json
+import os
+import time
 from io import StringIO
+from pathlib import Path
 
 import click
 from rich.console import Console
@@ -21,14 +25,23 @@ from .commands.remove import remove
 from .commands.restore import restore
 from .commands.status import status
 from .commands.update import update
+from .commands.upgrade import upgrade
 from .commands.use import use
+from .services.upgrade_service import (
+    UpgradeService,
+    UpgradeServiceError,
+    parse_version,
+)
+
+PASSIVE_UPGRADE_CHECK_TIMEOUT = 3.0
+PASSIVE_UPGRADE_CHECK_INTERVAL = 6 * 60 * 60
 
 # 命令分组：(分组名, [命令名...])
 COMMAND_GROUPS: list[tuple[str, list[str]]] = [
     ("部署管理", ["install", "start", "stop", "update", "remove", "daemon"]),
     ("实例管理", ["bind", "use", "list", "status"]),
     ("数据管理", ["backup", "restore", "config"]),
-    ("日志与工具", ["logs", "napcat"]),
+    ("日志与工具", ["logs", "napcat", "upgrade"]),
 ]
 
 
@@ -111,10 +124,115 @@ class RichGroup(click.Group):
         console.print()
 
 
+def _notify_upgrade_available() -> None:
+    """Best-effort update notice shown after successful CLI invocations."""
+
+    latest_version = _load_cached_latest_version()
+    update_available: bool
+    if latest_version is None:
+        try:
+            result = UpgradeService(
+                release_timeout=PASSIVE_UPGRADE_CHECK_TIMEOUT,
+            ).check()
+        except UpgradeServiceError:
+            _save_cached_latest_version(__version__)
+            return
+        latest_version = result.latest_version
+        update_available = result.update_available
+        _save_cached_latest_version(latest_version)
+    else:
+        try:
+            update_available = parse_version(__version__) < parse_version(latest_version)
+        except UpgradeServiceError:
+            return
+
+    if update_available:
+        click.echo(
+            f"⚠ 发现 na-tools 新版本 {latest_version}"
+            f"（当前 {__version__}），运行 na-tools upgrade 更新。",
+            err=True,
+        )
+
+
+def _upgrade_cache_path() -> Path:
+    """Return the per-user cache used only by passive update checks."""
+
+    cache_root = os.environ.get("XDG_CACHE_HOME")
+    base = Path(cache_root).expanduser() if cache_root else Path.home() / ".cache"
+    return base / "na-tools" / "upgrade-check.json"
+
+
+def _load_cached_latest_version() -> str | None:
+    """Return a fresh cached release version, ignoring malformed cache data."""
+
+    try:
+        payload = json.loads(_upgrade_cache_path().read_text(encoding="utf-8"))
+        checked_at = float(payload["checked_at"])
+        latest_version = payload["latest_version"]
+        age = time.time() - checked_at
+        if (
+            not isinstance(latest_version, str)
+            or not 0 <= age <= PASSIVE_UPGRADE_CHECK_INTERVAL
+        ):
+            return None
+        _ = parse_version(latest_version)
+        return latest_version
+    except (KeyError, OSError, TypeError, ValueError, UpgradeServiceError):
+        return None
+
+
+def _save_cached_latest_version(latest_version: str) -> None:
+    """Persist a passive-check result without affecting the command on failure."""
+
+    path = _upgrade_cache_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {"checked_at": time.time(), "latest_version": latest_version},
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+    except OSError:
+        return
+
+
+def _version_callback(
+    ctx: click.Context,
+    _param: click.Parameter,
+    value: bool,
+) -> None:
+    """Print the version, then perform the passive update check."""
+
+    if not value or ctx.resilient_parsing:
+        return
+    click.echo(f"na-tools, version {__version__}", color=ctx.color)
+    _notify_upgrade_available()
+    ctx.exit()
+
+
 @click.group(cls=RichGroup)
-@click.version_option(version=__version__, prog_name="na-tools")
+@click.option(
+    "--version",
+    is_flag=True,
+    expose_value=False,
+    is_eager=True,
+    callback=_version_callback,
+    help="显示版本号并退出",
+)
 def main() -> None:
     """NA-Tools: Nekro Agent 部署管理工具"""
+
+
+@main.result_callback()
+@click.pass_context
+def _after_command(ctx: click.Context, result: object) -> object:
+    """Check for updates after a successful non-upgrade command."""
+
+    if ctx.invoked_subcommand != "upgrade":
+        _notify_upgrade_available()
+    return result
 
 
 main.add_command(install)
@@ -132,6 +250,7 @@ main.add_command(logs)
 main.add_command(use)
 main.add_command(list_cmd)
 main.add_command(napcat)
+main.add_command(upgrade)
 
 
 if __name__ == "__main__":

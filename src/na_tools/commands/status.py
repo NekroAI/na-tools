@@ -20,7 +20,7 @@ def status(data_dir: str | None) -> None:
         )
     except InstanceServiceError as exc:
         error(exc.message)
-        return
+        raise click.Abort() from exc
 
     if result.output:
         info(f"数据目录: {result.data_dir}\n")

@@ -16,6 +16,6 @@ def use(data_dir: str) -> None:
         path = InstanceService().use(data_dir)
     except InstanceServiceError as exc:
         error(exc.message)
-        return
+        raise click.Abort() from exc
     success(f"已切换当前数据目录至: {path}")
     info("后续命令将默认操作该目录。")
