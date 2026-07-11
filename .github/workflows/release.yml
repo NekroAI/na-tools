@@ -59,10 +59,11 @@ jobs:
             --noconfirm \
             --onefile \
             --name na-tools-linux-x86_64 \
+            --distpath release \
             --paths src \
             src/na_tools/__main__.py
-          chmod +x dist/na-tools-linux-x86_64
-          binary_version="$(dist/na-tools-linux-x86_64 --version | sed -n '1s/^na-tools, version //p')"
+          chmod +x release/na-tools-linux-x86_64
+          binary_version="$(release/na-tools-linux-x86_64 --version | sed -n '1s/^na-tools, version //p')"
           if [[ "$binary_version" != "$EXPECTED_VERSION" ]]; then
             echo "Binary version $binary_version does not match expected version $EXPECTED_VERSION."
             exit 1
@@ -80,6 +81,6 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.whl
-            dist/na-tools-linux-x86_64
+            release/na-tools-linux-x86_64
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
