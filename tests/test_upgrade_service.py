@@ -118,6 +118,26 @@ class UpgradeServiceTest(unittest.TestCase):
             "https://example.test/na-tools-linux-x86_64",
         )
 
+    def test_detects_uv_tool_when_python_is_symlinked_outside_tool_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            uv_dir = root / "tools"
+            executable = uv_dir / "na-tools" / "bin" / "python"
+            system_python = root / "usr" / "bin" / "python3.10"
+            executable.parent.mkdir(parents=True)
+            system_python.parent.mkdir(parents=True)
+            system_python.touch()
+            executable.symlink_to(system_python)
+            service = UpgradeService(
+                executable=executable,
+                uv_tool_dir_getter=lambda: uv_dir,
+            )
+
+            installation = service.detect_installation()
+
+        self.assertEqual(installation.method, "uv_tool")
+        self.assertEqual(installation.executable, executable.absolute())
+
     def test_missing_release_tag_fails_structurally(self) -> None:
         service = UpgradeService(release_fetcher=lambda: {"assets": []})
 
@@ -171,7 +191,7 @@ class UpgradeServiceTest(unittest.TestCase):
         self.assertEqual(
             calls,
             [
-                ["uv", "tool", "upgrade", "na-tools"],
+                ["uv", "tool", "install", "--force", "na-tools==1.4.0"],
                 [
                     str(executable),
                     "-c",

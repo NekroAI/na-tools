@@ -108,7 +108,7 @@ na-tools upgrade --yes
 
 版本检测以 `NekroAI/na-tools` 的 GitHub Releases 最新稳定版为准。自动更新支持：
 
-- `uv tool install na-tools` 安装的版本：执行 `uv tool upgrade na-tools`
+- `uv tool install na-tools` 安装的版本：强制安装检测到的目标版本
 - GitHub Release 中的 Linux x86_64 二进制：下载 `na-tools-linux-x86_64`，校验后替换当前可执行文件
 
 源码开发安装、pip 普通安装或其他方式安装的版本仅支持检测，会提示手动更新方式。

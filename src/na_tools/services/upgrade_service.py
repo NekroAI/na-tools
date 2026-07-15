@@ -175,18 +175,18 @@ class UpgradeService:
     def detect_installation(self) -> InstallationInfo:
         """Detect whether the current process is a uv tool or bundled binary."""
 
-        executable = self._executable.expanduser().resolve()
+        executable = self._executable.expanduser().absolute()
         if self._frozen:
             return InstallationInfo(
                 method="binary",
-                executable=executable,
+                executable=executable.resolve(),
                 detail="当前进程是打包后的二进制文件。",
             )
 
         uv_tool_dir = self._uv_tool_dir_getter()
         if uv_tool_dir is not None and _is_relative_to(
             executable,
-            uv_tool_dir.expanduser().resolve(),
+            uv_tool_dir.expanduser().absolute(),
         ):
             return InstallationInfo(
                 method="uv_tool",
@@ -228,8 +228,17 @@ class UpgradeService:
     def _upgrade_uv_tool(self, expected_version: str) -> None:
         if self._uv_finder("uv") is None:
             raise UpgradeServiceError("uv_missing", "未找到 uv，无法执行 uv tool 升级。")
+        normalized_expected = normalize_version(expected_version)
         try:
-            self._runner(["uv", "tool", "upgrade", PACKAGE_NAME])
+            self._runner(
+                [
+                    "uv",
+                    "tool",
+                    "install",
+                    "--force",
+                    f"{PACKAGE_NAME}=={normalized_expected}",
+                ]
+            )
             version_result = self._runner(
                 [
                     str(self._executable),
@@ -248,7 +257,6 @@ class UpgradeService:
             _ = parse_version(actual_version)
         except UpgradeServiceError:
             actual_version = ""
-        normalized_expected = normalize_version(expected_version)
         if actual_version != normalized_expected:
             raise UpgradeServiceError(
                 "uv_version_mismatch",
