@@ -103,8 +103,11 @@ def patch_compose_daemon_channel(data_dir: Path) -> tuple[bool, str | None]:
     if not compose_path.exists():
         return False, f"compose file not found: {compose_path}"
 
-    with open(compose_path, encoding="utf-8") as f:
-        content = yaml.safe_load(f)
+    try:
+        with open(compose_path, encoding="utf-8") as f:
+            content = yaml.safe_load(f)
+    except (OSError, yaml.YAMLError) as exc:
+        return False, f"compose file cannot be read safely: {exc}"
 
     if not isinstance(content, dict):
         return False, "compose file is not a YAML mapping"

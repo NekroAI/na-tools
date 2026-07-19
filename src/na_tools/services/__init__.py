@@ -11,6 +11,8 @@ _EXPORT_MODULES = {
     "BackupService": ".backup_service",
     "BackupServiceError": ".backup_service",
     "ConfigService": ".config_service",
+    "DaemonRegistrationResult": ".daemon_service",
+    "DaemonRegistrationService": ".daemon_service",
     "DaemonRootServiceManager": ".daemon_service",
     "DaemonRootServiceResult": ".daemon_service",
     "DaemonService": ".daemon_service",
@@ -62,6 +64,8 @@ if TYPE_CHECKING:
     from .backup_service import BackupRequest, BackupResult, BackupService, BackupServiceError
     from .config_service import ConfigService
     from .daemon_service import (
+        DaemonRegistrationResult,
+        DaemonRegistrationService,
         DaemonRootServiceManager,
         DaemonRootServiceResult,
         DaemonService,

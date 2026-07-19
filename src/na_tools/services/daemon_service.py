@@ -11,10 +11,13 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from subprocess import CalledProcessError
-from typing import Callable, Literal
+from typing import Callable, Literal, Protocol
 
+from ..core.compose import compose_exists
+from ..core.docker import DockerEnv
 from ..core.platform import default_data_dir, get_os, run_cmd
 from ..daemon import DEFAULT_DAEMON_API_BASE, DEFAULT_DAEMON_SOCKS_URL
+from ..daemon.channel import DaemonChannelResult, ensure_daemon_channel
 from .common import ServiceError
 
 DaemonRootAction = Literal["install_start", "start", "stop", "uninstall"]
@@ -41,6 +44,16 @@ class DaemonRootServiceResult:
     service_path: Path
     action: DaemonRootAction
     command: str
+
+
+@dataclass(frozen=True)
+class DaemonRegistrationResult:
+    """Summary of preparing and registering one daemon-enabled instance."""
+
+    data_dir: Path
+    daemon_channel: DaemonChannelResult
+    daemon_service: DaemonRootServiceResult
+    container_recreated: bool
 
 
 @dataclass
@@ -85,6 +98,92 @@ Chmod = Callable[[Path, int], None]
 RootChecker = Callable[[], bool]
 
 
+class DockerLike(Protocol):
+    """Subset of DockerEnv used when applying daemon channel changes."""
+
+    docker_installed: bool
+    compose_installed: bool
+
+    def up(self, cwd: Path, env_file: Path | None = None) -> bool:
+        """Create or update the instance containers."""
+
+
+DockerFactory = Callable[[], DockerLike]
+ChannelPreparer = Callable[..., DaemonChannelResult]
+
+
+@dataclass
+class DaemonRegistrationService:
+    """Prepare an existing instance and register its root daemon service."""
+
+    docker_factory: DockerFactory = DockerEnv
+    daemon_service_manager: DaemonRootServiceManager | None = None
+    channel_preparer: ChannelPreparer = ensure_daemon_channel
+
+    def run(self, data_dir: Path) -> DaemonRegistrationResult:
+        resolved = data_dir.expanduser().resolve()
+        env_path = resolved / ".env"
+        if not resolved.exists():
+            raise DaemonServiceError(
+                "data_dir_missing",
+                f"数据目录不存在: {resolved}",
+            )
+        if not compose_exists(resolved):
+            raise DaemonServiceError(
+                "compose_missing",
+                f"未找到 docker-compose.yml。数据目录: {resolved}",
+            )
+        if not env_path.exists():
+            raise DaemonServiceError(
+                "env_missing",
+                f"未找到实例环境配置: {env_path}",
+            )
+
+        try:
+            daemon_channel = self.channel_preparer(resolved, overwrite_env=True)
+        except (OSError, ValueError) as exc:
+            raise DaemonServiceError(
+                "daemon_channel_prepare_failed",
+                f"daemon channel 配置失败: {exc}",
+            ) from exc
+        if daemon_channel.compose_warning:
+            raise DaemonServiceError(
+                "daemon_channel_compose_failed",
+                f"daemon compose 配置无法安全合并: {daemon_channel.compose_warning}",
+                details={"data_dir": str(resolved)},
+            )
+
+        manager = self.daemon_service_manager or DaemonRootServiceManager()
+        daemon_service = manager.install_and_start(resolved)
+        config_changed = bool(
+            daemon_channel.env_updated_keys or daemon_channel.compose_updated
+        )
+        container_recreated = False
+        if config_changed:
+            docker = self.docker_factory()
+            if not docker.docker_installed or not docker.compose_installed:
+                raise DaemonServiceError(
+                    "daemon_container_restart_failed",
+                    "daemon 已注册，但 Docker 或 Docker Compose 不可用，"
+                    "NA 容器配置尚未生效。",
+                    details={"data_dir": str(resolved)},
+                )
+            if not docker.up(cwd=resolved, env_file=env_path):
+                raise DaemonServiceError(
+                    "daemon_container_restart_failed",
+                    "daemon 已注册，但 NA 容器重建失败，daemon 配置尚未生效。",
+                    details={"data_dir": str(resolved)},
+                )
+            container_recreated = True
+
+        return DaemonRegistrationResult(
+            data_dir=resolved,
+            daemon_channel=daemon_channel,
+            daemon_service=daemon_service,
+            container_recreated=container_recreated,
+        )
+
+
 @dataclass
 class DaemonRootServiceManager:
     """Install and control the root/system daemon service."""
@@ -104,7 +203,11 @@ class DaemonRootServiceManager:
         self._ensure_root()
         resolved = data_dir.expanduser().resolve()
         platform_name = self.platform_getter()
-        service_name, service_path = self._service_identity(resolved, platform_name)
+        service_name, service_path = self._resolve_service_identity(
+            resolved,
+            platform_name,
+            allow_missing=True,
+        )
         self._write_service_file(platform_name, service_path, service_name, resolved)
         try:
             if platform_name == "linux":
@@ -150,17 +253,10 @@ class DaemonRootServiceManager:
 
         resolved = data_dir.expanduser().resolve()
         platform_name = self.platform_getter()
-        service_name, service_path = self._service_identity(resolved, platform_name)
-        if not service_path.exists():
-            raise DaemonServiceError(
-                "daemon_service_missing",
-                "未找到已注册的 root daemon 服务。",
-                details={
-                    "service_name": service_name,
-                    "service_path": str(service_path),
-                    "data_dir": str(resolved),
-                },
-            )
+        service_name, service_path = self._resolve_service_identity(
+            resolved,
+            platform_name,
+        )
 
         self._ensure_root()
         try:
@@ -198,18 +294,10 @@ class DaemonRootServiceManager:
     ) -> DaemonRootServiceResult:
         resolved = data_dir.expanduser().resolve()
         platform_name = self.platform_getter()
-        service_name, service_path = self._service_identity(resolved, platform_name)
-        if not service_path.exists():
-            raise DaemonServiceError(
-                "daemon_service_missing",
-                "未找到已注册的 root daemon 服务，请先运行 `na-tools install`，"
-                "或使用 `--without-daemon` 跳过 daemon 操作。",
-                details={
-                    "service_name": service_name,
-                    "service_path": str(service_path),
-                    "data_dir": str(resolved),
-                },
-            )
+        service_name, service_path = self._resolve_service_identity(
+            resolved,
+            platform_name,
+        )
 
         try:
             if platform_name == "linux":
@@ -334,6 +422,21 @@ class DaemonRootServiceManager:
 
     def _service_identity(self, data_dir: Path, platform_name: str) -> tuple[str, Path]:
         suffix = self._service_suffix(data_dir)
+        return self._service_identity_for_suffix(suffix, platform_name)
+
+    def _legacy_service_identity(
+        self,
+        data_dir: Path,
+        platform_name: str,
+    ) -> tuple[str, Path]:
+        suffix = hashlib.sha256(str(data_dir).encode("utf-8")).hexdigest()[:12]
+        return self._service_identity_for_suffix(suffix, platform_name)
+
+    def _service_identity_for_suffix(
+        self,
+        suffix: str,
+        platform_name: str,
+    ) -> tuple[str, Path]:
         if platform_name == "linux":
             service_name = f"na-tools-daemon-{suffix}.service"
             return service_name, self.systemd_dir / service_name
@@ -343,6 +446,46 @@ class DaemonRootServiceManager:
         raise DaemonServiceError(
             "unsupported_platform",
             f"当前系统不支持 root daemon 服务: {platform_name}",
+        )
+
+    def _resolve_service_identity(
+        self,
+        data_dir: Path,
+        platform_name: str,
+        *,
+        allow_missing: bool = False,
+    ) -> tuple[str, Path]:
+        current = self._service_identity(data_dir, platform_name)
+        legacy = self._legacy_service_identity(data_dir, platform_name)
+        candidates = [current]
+        if legacy[1] != current[1]:
+            candidates.append(legacy)
+        existing = [candidate for candidate in candidates if candidate[1].exists()]
+        if len(existing) > 1:
+            raise DaemonServiceError(
+                "daemon_service_conflict",
+                "检测到当前实例同时存在新版和旧版 root daemon 服务，请先人工处理冲突。",
+                details={
+                    "service_names": [item[0] for item in existing],
+                    "service_paths": [str(item[1]) for item in existing],
+                    "data_dir": str(data_dir),
+                },
+            )
+        if existing:
+            return existing[0]
+        if allow_missing:
+            return current
+        raise DaemonServiceError(
+            "daemon_service_missing",
+            "未找到已注册的 root daemon 服务，请先运行 `na-tools install`，"
+            "或使用 `--without-daemon` 跳过 daemon 操作。",
+            details={
+                "service_name": current[0],
+                "service_path": str(current[1]),
+                "legacy_service_name": legacy[0],
+                "legacy_service_path": str(legacy[1]),
+                "data_dir": str(data_dir),
+            },
         )
 
     @staticmethod

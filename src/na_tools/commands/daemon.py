@@ -145,19 +145,26 @@ def status(data_dir: str | None, as_json: bool) -> None:
 @with_sudo_fallback
 @click.option("--data-dir", type=click.Path(), default=None, help="Nekro Agent data dir")
 def register(data_dir: str | None) -> None:
-    """Register and start the root daemon service."""
+    """Prepare an instance, then register and start its root daemon service."""
 
-    from ..services.daemon_service import DaemonRootServiceManager, DaemonServiceError
+    from ..services.daemon_service import DaemonRegistrationService, DaemonServiceError
 
     resolved_data_dir = Path(data_dir or default_data_dir()).expanduser().resolve()
 
     try:
-        result = DaemonRootServiceManager().install_and_start(resolved_data_dir)
+        result = DaemonRegistrationService().run(resolved_data_dir)
     except DaemonServiceError as exc:
         error(exc.message)
         raise click.Abort()
-    success(f"daemon root 服务已注册并启动: {result.service_name}")
-    info(f"服务文件: {result.service_path}")
+    info(f"daemon 实例 ID: {result.daemon_channel.instance_id}")
+    if result.daemon_channel.env_updated_keys:
+        info("已补齐 daemon 环境变量。")
+    if result.daemon_channel.compose_updated:
+        info("已补齐 daemon compose 环境变量和 host gateway。")
+    success(f"daemon root 服务已注册并启动: {result.daemon_service.service_name}")
+    info(f"服务文件: {result.daemon_service.service_path}")
+    if result.container_recreated:
+        success("NA 容器已重建，daemon 配置已生效。")
 
 
 @daemon.command()

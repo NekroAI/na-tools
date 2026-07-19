@@ -84,13 +84,21 @@ class DaemonRegisterCommandTest(unittest.TestCase):
             data_dir = Path(tmp) / "nekro_agent"
             service_path = Path(tmp) / "na-tools-daemon-test.service"
             manager = Mock()
-            manager.install_and_start.return_value = SimpleNamespace(
-                service_name=service_path.name,
-                service_path=service_path,
+            manager.run.return_value = SimpleNamespace(
+                daemon_channel=SimpleNamespace(
+                    instance_id="sha256:test",
+                    env_updated_keys=("NA_TOOLS_DAEMON_ENABLED",),
+                    compose_updated=True,
+                ),
+                daemon_service=SimpleNamespace(
+                    service_name=service_path.name,
+                    service_path=service_path,
+                ),
+                container_recreated=True,
             )
 
             with patch(
-                "na_tools.services.daemon_service.DaemonRootServiceManager",
+                "na_tools.services.daemon_service.DaemonRegistrationService",
                 return_value=manager,
             ):
                 result = CliRunner().invoke(
@@ -99,10 +107,13 @@ class DaemonRegisterCommandTest(unittest.TestCase):
                 )
 
         self.assertEqual(result.exit_code, 0, result.output)
-        manager.install_and_start.assert_called_once_with(data_dir.resolve())
+        manager.run.assert_called_once_with(data_dir.resolve())
         self.assertIn("已注册并启动", result.output)
         self.assertIn(service_path.name, result.output)
         self.assertIn(str(service_path), result.output)
+        self.assertIn("环境变量", result.output)
+        self.assertIn("host gateway", result.output)
+        self.assertIn("容器已重建", result.output)
 
 
 class _FakeBindSocket:
